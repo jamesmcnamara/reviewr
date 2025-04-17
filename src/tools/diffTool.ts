@@ -1,7 +1,6 @@
 import * as fs from 'fs/promises';
 import parseDiff, { type File } from 'parse-diff';
 import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Interface for a merged diff chunk
@@ -40,12 +39,15 @@ export async function readDiffFile(filePath: string): Promise<DiffChunk[]> {
  */
 export function mergeDiffChunks(files: File[]): DiffChunk[] {
   const mergedChunks: DiffChunk[] = [];
+  const filenames = new Map<string, number>();
 
   // Process each file
   for (const file of files) {
     if (!file.chunks || file.chunks.length === 0) continue;
 
     const filename = file.to || file.from || 'unknown';
+    const existingCount = filenames.get(filename) || 0;
+    filenames.set(filename, existingCount + 1);
     let mergedContent = '';
     let mergedPatch = '';
 
@@ -79,7 +81,7 @@ export function mergeDiffChunks(files: File[]): DiffChunk[] {
 
     // Create a merged chunk for this file
     mergedChunks.push({
-      id: uuidv4(),
+      id: filename + '-' + (existingCount + 1),
       content: mergedContent.trim(),
       filename,
       patch: mergedPatch.trim()

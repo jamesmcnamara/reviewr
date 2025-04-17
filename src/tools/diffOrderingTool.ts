@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { Tool, ToolHandler } from '../lib/toolHandler';
 import { LlmClient } from '../lib/llmClient';
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import { DiffChunk, readDiffFile } from './diffTool';
 
 export interface DependencyGraph {
@@ -35,22 +34,40 @@ export async function getDiffSlugs(
   const chunkMetadata: Map<string, ChunkMeta> = new Map();
   const tags = new Set<string>();
   const assignChunkMetadata = assignChunkMetadataTool(chunkMetadata, tags);
-  const systemPrompt = `You are an expert code analyst. Your task is to analyze a diff chunk and determine if a set of tags that describe the responsibilities of the code change within. 
+  const systemPrompt = `You are an expert code analyst. Your task is to analyze a diff chunk and determine a set of tags that describe the responsibilities of the code change within. You will also see a list of existing tags that previous chunks have reported. If the tags you determine are similar to any of the existing tags, you should use the existing tags instead to allow grouping.
 
-    You will also see a list of existing tags that previous chunks have reported. If the tags you determine are similar to any of the existing tags, you should use the existing tags instead to allow grouping.
+Additionally, you must report the priority of the chunk as either 'high', 'low', or 'unknown' based on the following criteria:
 
-    Additionally, you must report the priority of the chunk, in terms of if it contains impactful changes to the code base, as compared to mechanical changes to generated files or downstream changes from an interface update. If you are uncertain the priority should be reported as 'unknown'. 
+HIGH PRIORITY changes (less than 10% of all chunks) are those that:
+- Introduce significant new functionality or business logic
+- Modify critical security mechanisms (not just comments about security)
+- Change core algorithms that affect system behavior
+- Substantively alter database schemas or data handling
+- Fix critical bugs that could cause system failure or data corruption
+- Implement complex architectural changes
 
-    As a general rule of thumb, less than 10% of chunks will include a high priority change.
-    
-    Some examples of tags are:
-    - telemetry
-    - error handling
-    - diff chunker interface
-    - customer sales database
-    
-    VERY IMPORTANT: You MUST report your analysis using the assign_chunk_metadata tool
-    
+LOW PRIORITY changes (the majority of chunks) include:
+- Mechanical refactorings (e.g., changing a collection, updating a function signature due to upstream changes, renaming variables)
+- Style or formatting changes
+- Documentation updates or comment changes
+- Generated code or boilerplate
+- Configuration tweaks
+- Test additions that don't reveal bugs
+- Downstream adaptations to interface changes made elsewhere
+- Simple dependency updates
+- Changes that follow an obvious pattern applied throughout the codebase
+
+If you are genuinely uncertain about the priority, report it as 'unknown'.
+
+Some examples of tags are:
+- telemetry
+- error handling
+- diff chunker interface
+- customer sales database
+
+If a specific new data type is added and referenced in many places, use the name of the data type in the tags.
+
+VERY IMPORTANT: You MUST report your analysis using the assign_chunk_metadata tool
     `;
 
   for (const chunk of chunks) {
