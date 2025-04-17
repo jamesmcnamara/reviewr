@@ -3,7 +3,7 @@ import { Tool } from '../lib/toolHandler';
 import { LlmClient } from '../lib/llmClient';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import parseDiff from 'parse-diff';
+import parseDiff, { Chunk } from 'parse-diff';
 
 // Types for our dependency graph
 export interface DiffChunk {
@@ -33,6 +33,66 @@ function truncateContent(content: string, maxLength = 200): string {
   return content.substring(0, maxLength) + '...';
 }
 
+export async function getDiffSlugs(
+  chunks: DiffChunk[],
+  llmClient: LlmClient
+): Promise<Map<string, ChunkMeta>> {
+  if (!chunks.length) {
+    return new Map();
+  }
+  const chunkMetadata: Map<string, ChunkMeta> = new Map();
+  const tags = new Set<string>();
+  const assignChunkMetadata = assignChunkMetadataTool(chunkMetadata, tags);
+  const systemPrompt = `You are an expert code analyst. Your task is to analyze a diff chunk and determine if a set of tags that describe the responsibilities of the code change within. 
+
+    You will also see a list of existing tags that previous chunks have reported. If the tags you determine are similar to any of the existing tags, you should use the existing tags instead to allow grouping.
+
+    Additionally, you must report the priority of the chunk, in terms of if it contains impactful changes to the code base, as compared to mechanical changes to generated files or downstream changes from an interface update. If you are uncertain the priority should be reported as 'unknown'. 
+
+    As a general rule of thumb, less than 10% of chunks will include a high priority change.
+    
+    Some examples of tags are:
+    - telemetry
+    - error handling
+    - diff chunker interface
+    - customer sales database
+    
+    VERY IMPORTANT: You MUST report your analysis using the assign_chunk_metadata tool
+    
+    `;
+
+  for (const chunk of chunks) {
+    const prompt = JSON.stringify(
+      {
+        chunk: {
+          id: chunk.id,
+          content: chunk.content,
+          filename: chunk.filename
+        },
+        existingTags: Array.from(tags)
+      },
+      null,
+      2
+    );
+
+    await llmClient.runWithTools(
+      prompt,
+      systemPrompt,
+      chunk.id, // Use chunk id as log key
+      ...[assignChunkMetadata] // Spread array to pass as rest parameters
+    );
+
+    // Add this node to processed nodes for future chunk analysis
+  }
+
+  await fs.writeFile(
+    './meta.json',
+    JSON.stringify(Object.fromEntries(chunkMetadata.entries()), null, 2),
+    'utf-8'
+  );
+
+  return chunkMetadata;
+}
 // Process individual diff chunks with LLM to build dependency graph
 export async function processDiffChunks(
   chunks: DiffChunk[],
@@ -114,7 +174,7 @@ export async function processDiffChunks(
     );
 
     try {
-      const response = await llmClient.runWithTools(
+      await llmClient.runWithTools(
         prompt,
         systemPrompt,
         chunk.id, // Use chunk id as log key
@@ -155,6 +215,46 @@ function reportDependenciesTool(
     schema: reportDependenciesSchema,
     execute: async (params) => {
       graph.dependencies[params.chunkId] = params.dependencies;
+    }
+  };
+}
+
+const assignChunkMetadataSchema = z.object({
+  tags: z
+    .array(z.string())
+    .describe('The list of tags to associate with this chunk.'),
+  priority: z
+    .enum(['high', 'low', 'unknown'])
+    .describe(
+      'The priority of this chunk in terms of if it contains impactful changes to the code base, as compared to mechanical changes to generated files or downstream changes from an interface update. If you are uncertain add unknown to the list of tags'
+    ),
+  chunkId: z
+    .string()
+    .describe('The ID of the diff chunk whose dependencies are being reported')
+});
+
+interface ChunkMeta {
+  tags: string[];
+  priority: 'high' | 'low' | 'unknown';
+}
+
+// Tool to parse and split a diff string into chunks
+function assignChunkMetadataTool(
+  meta: Map<string, ChunkMeta>,
+  tags: Set<string>
+): Tool<typeof assignChunkMetadataSchema> {
+  return {
+    name: 'assign_chunk_metadata',
+    description: 'Associate a diff chunk with a list of tags',
+    schema: assignChunkMetadataSchema,
+    execute: async (params) => {
+      meta.set(params.chunkId, {
+        tags: params.tags,
+        priority: params.priority
+      });
+      for (const tag of params.tags) {
+        tags.add(tag);
+      }
     }
   };
 }
@@ -329,30 +429,8 @@ const diffOrderingTool: Tool<typeof processDiffSchema> = {
         process.env.LOG_DIRECTORY
       );
 
-      // Process the chunks to build the dependency graph
-      const graph = await processDiffChunks(chunks, tempLlmClient);
-
-      // Sort the chunks topologically
-      const orderedChunks = topologicalSort(graph);
-
-      // Format the output
-      const output = formatOrderedDiff(orderedChunks);
-
-      // Save to file if outputPath is provided
-      if (params.outputPath) {
-        await fs.writeFile(path.resolve(params.outputPath), output, 'utf-8');
-      }
-
-      return {
-        orderedChunks: orderedChunks.map((chunk) => ({
-          id: chunk.id,
-          filename: chunk.filename
-        })),
-        outputPath: params.outputPath,
-        message: params.outputPath
-          ? `Ordered diff saved to ${params.outputPath}`
-          : 'Diff ordering completed successfully'
-      };
+      await getDiffSlugs(chunks, tempLlmClient);
+      process.exit(0);
     } catch (error) {
       throw new Error(
         `Failed to process diff: ${

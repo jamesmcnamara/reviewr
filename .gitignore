@@ -2,7 +2,9 @@ dist/
 node_modules/
 coverage/
 logs/
+patches/
 test-logs/
 ordered-diff.md
 ordered-test-diff.md
 graph.json
+meta.json
