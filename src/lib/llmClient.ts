@@ -25,6 +25,15 @@ class LlmClient {
     this.toolHandler = toolHandler;
   }
 
+  async countTokens(diff: string): Promise<number> {
+    return this.client.messages
+      .countTokens({
+        model: 'claude-3-7-sonnet-latest',
+        messages: [{ role: 'user', content: diff }]
+      })
+      .then((response) => response.input_tokens);
+  }
+
   async runWithTools(
     prompt: string,
     systemPrompt: string = 'You are a helpful assistant.'

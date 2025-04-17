@@ -1,11 +1,10 @@
 import dotenv from 'dotenv';
 import { Command } from 'commander';
 import express from 'express';
+import fs from 'fs/promises';
 import { ToolHandler } from './lib/toolHandler';
 import { LlmClient } from './lib/llmClient';
 import { fileTool, listFilesTool } from './tools/fileTool';
-import { processTextTool } from './tools/processingTool';
-import { parseDiffTool, readDiffFileTool } from './tools/diffTool';
 
 dotenv.config();
 
@@ -20,10 +19,6 @@ if (!apiKey) {
 const toolHandler = new ToolHandler();
 toolHandler.registerTool(fileTool);
 toolHandler.registerTool(listFilesTool);
-toolHandler.registerTool(processTextTool);
-toolHandler.registerTool(parseDiffTool);
-toolHandler.registerTool(readDiffFileTool);
-
 // Initialize LLM client
 const llmClient = new LlmClient(apiKey, toolHandler);
 
@@ -31,7 +26,9 @@ const program = new Command();
 
 program
   .version('1.0.0')
-  .description('A CLI tool and web server for interacting with LLMs and executing local tools');
+  .description(
+    'A CLI tool and web server for interacting with LLMs and executing local tools'
+  );
 
 // CLI command for sending a prompt
 program
@@ -44,7 +41,27 @@ program
       console.log('\nLLM Response:');
       console.log(response);
     } catch (error) {
-      console.error('Error:', error instanceof Error ? error.message : String(error));
+      console.error(
+        'Error:',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    process.exit(0);
+  });
+
+program
+  .command('tokens')
+  .description('Get the number of tokens in a diff')
+  .action(async () => {
+    try {
+      const diff = await fs.readFile('./patches/grader-patch.diff', 'utf-8');
+      const tokens = await llmClient.countTokens(diff);
+      console.log(`Number of tokens: ${tokens}`);
+    } catch (error) {
+      console.error(
+        'Error:',
+        error instanceof Error ? error.message : String(error)
+      );
     }
     process.exit(0);
   });
@@ -72,24 +89,31 @@ program
 
     // Create the router
     const router = express.Router();
-    
+
     // Define the route on the router
     router.post('/prompt', (req, res) => {
       try {
         const { prompt, systemPrompt } = req.body;
-        
+
         if (!prompt) {
           return res.status(400).json({ error: 'Prompt is required' });
         }
-        
-        llmClient.runWithTools(prompt, systemPrompt)
-          .then(response => res.json({ response }))
-          .catch(error => res.status(500).json({ error: error instanceof Error ? error.message : String(error) }));
+
+        llmClient
+          .runWithTools(prompt, systemPrompt)
+          .then((response) => res.json({ response }))
+          .catch((error) =>
+            res.status(500).json({
+              error: error instanceof Error ? error.message : String(error)
+            })
+          );
       } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+        res.status(500).json({
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     });
-    
+
     // Use the router
     app.use('/api', router);
 
