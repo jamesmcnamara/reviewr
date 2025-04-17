@@ -3,17 +3,29 @@ import { Anthropic } from '@anthropic-ai/sdk';
 // Define our own types to match Anthropic's API
 type MessageParam = {
   role: 'user' | 'assistant';
-  content: string | any[];
+  content: string | ContentBlock[];
   name?: string;
 };
 
-type ContentBlock = {
-  type: string;
-  text?: string;
-  id?: string;
-  name?: string;
-  input?: any;
+type TextBlock = {
+  type: 'text';
+  text: string;
 };
+
+type ToolUseBlock = {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+};
+
+type ToolResultBlock = {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+};
+
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
 import { ToolHandler, ToolCall } from './toolHandler';
 
 class LlmClient {
@@ -53,21 +65,19 @@ class LlmClient {
         tools: this.toolHandler.getToolsSchema()
       });
 
-      // Check if there are any tool use blocks
-      const toolUseBlock = response.content.find(
+      // Find all tool use blocks
+      const toolUseBlocks = response.content.filter(
         (block) => block.type === 'tool_use'
       );
 
-      if (toolUseBlock && toolUseBlock.type === 'tool_use') {
-        console.log('Tool calls requested:', toolUseBlock.id);
+      if (toolUseBlocks.length > 0) {
+        console.log('Tool calls requested:', toolUseBlocks.map(block => block.name).join(', '));
 
         // Parse tool calls and execute them
-        const toolCalls: ToolCall[] = [
-          {
-            tool_name: toolUseBlock.name,
-            parameters: toolUseBlock.input
-          }
-        ];
+        const toolCalls: ToolCall[] = toolUseBlocks.map(block => ({
+          tool_name: block.name,
+          parameters: block.input
+        }));
 
         // Execute tools and get results
         const toolResults = await this.toolHandler.handleToolCalls(toolCalls);
@@ -75,18 +85,22 @@ class LlmClient {
         // Add assistant message to the conversation
         messages.push({ role: 'assistant', content: response.content });
 
-        // Format the tool result as expected by Anthropic API
-        if (toolUseBlock.id) {
-          const toolResult = toolResults[0]; // We currently only handle one tool call at a time
+        // Format the tool results as expected by Anthropic API
+        const toolResultsContent = toolUseBlocks
+          .map((block, index) => {
+            if (!block.id) return null;
+            return {
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: toolResults[index].content
+            };
+          })
+          .filter(Boolean); // Remove any null entries
+
+        if (toolResultsContent.length > 0) {
           messages.push({
             role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: toolUseBlock.id,
-                content: toolResult.content
-              }
-            ]
+            content: toolResultsContent
           });
         }
       } else {
@@ -94,11 +108,9 @@ class LlmClient {
         hasToolCalls = false;
         // Find the text block
         const textBlock = response.content.find(
-          (block) => block.type === 'text'
+          (block): block is TextBlock => block.type === 'text'
         );
-        return textBlock && textBlock.type === 'text'
-          ? textBlock.text
-          : 'No text response';
+        return textBlock ? textBlock.text : 'No text response';
       }
     }
 
