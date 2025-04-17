@@ -24,8 +24,11 @@ toolHandler.registerTool(listFilesTool);
 toolHandler.registerTool(diffOrderingTool);
 toolHandler.registerTool(parseDiffTool);
 toolHandler.registerTool(readDiffFileTool);
+// Get log directory from environment if specified
+const logDirectory = process.env.LOG_DIRECTORY;
+
 // Initialize LLM client
-const llmClient = new LlmClient(apiKey, toolHandler);
+const llmClient = new LlmClient(apiKey, toolHandler, logDirectory);
 
 const program = new Command();
 
@@ -40,9 +43,10 @@ program
   .command('prompt <text>')
   .description('Send a prompt to the LLM')
   .option('-s, --system <text>', 'System prompt to use')
+  .option('-k, --key <key>', 'Log key to identify this conversation in logs')
   .action(async (text, options) => {
     try {
-      const response = await llmClient.runWithTools(text, options.system);
+      const response = await llmClient.runWithTools(text, options.system, options.key);
       console.log('\nLLM Response:');
       console.log(response);
     } catch (error) {
@@ -124,14 +128,14 @@ program
     // Define the route on the router
     router.post('/prompt', (req, res) => {
       try {
-        const { prompt, systemPrompt } = req.body;
+        const { prompt, systemPrompt, logKey } = req.body;
 
         if (!prompt) {
           return res.status(400).json({ error: 'Prompt is required' });
         }
 
         llmClient
-          .runWithTools(prompt, systemPrompt)
+          .runWithTools(prompt, systemPrompt, logKey)
           .then((response) => res.json({ response }))
           .catch((error) =>
             res.status(500).json({

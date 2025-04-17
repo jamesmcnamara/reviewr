@@ -7,7 +7,8 @@ This project provides a framework for sending prompts to LLMs (like Anthropic's 
 1. Clone the repository
 2. Install dependencies: `npm install`
 3. Set your Anthropic API key in the `.env` file
-4. Build the project: `npm run build`
+4. (Optional) Set a log directory in the `.env` file: `LOG_DIRECTORY=./logs`
+5. Build the project: `npm run build`
 
 ## Usage
 
@@ -19,6 +20,9 @@ node dist/index.js prompt "Read the file README.md and summarize it"
 
 # Send a prompt with a custom system prompt
 node dist/index.js prompt "Process this text: Hello World" -s "You are an expert at text processing"
+
+# Send a prompt and log the conversation with a unique key
+node dist/index.js prompt "Analyze this code" -k "code-analysis-1"
 
 # Show all available tool schemas
 node dist/index.js show-schemas
@@ -40,7 +44,7 @@ Send a request:
 ```bash
 curl -X POST http://localhost:3000/api/prompt \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"Read the README.md file", "systemPrompt":"You are a helpful assistant."}'
+  -d '{"prompt":"Read the README.md file", "systemPrompt":"You are a helpful assistant.", "logKey":"readme-analysis"}'
 ```
 
 ## Creating Custom Tools
@@ -88,6 +92,7 @@ toolHandler.registerTool(myTool);
 3. Tool calls are intercepted, validated against their schemas, and executed
 4. Results are sent back to the LLM
 5. The LLM continues generating a response
+6. If logging is enabled, the conversation is saved to a JSON file in the specified directory
 
 The Zod schemas provide both runtime validation and generate JSON Schema for the LLM to understand the tool parameters.
 
