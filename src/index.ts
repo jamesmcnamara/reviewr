@@ -110,10 +110,11 @@ program
     'Path to save the ordered diff',
     './ordered-diff.md'
   )
+  .option('-r, --restore', 'Restore the from a checkpoint')
   .action(async (options) => {
     try {
       console.log(`Processing diff file: ${options.input}`);
-      await diffOrderingTool(options.input, options.output);
+      await diffOrderingTool(options.input, options.output, options.restore);
     } catch (error) {
       console.error(
         'Error:',

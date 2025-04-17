@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { object, z } from 'zod';
 import { Tool, ToolHandler } from '../lib/toolHandler';
 import { LlmClient } from '../lib/llmClient';
 import * as fs from 'fs/promises';
@@ -88,7 +88,7 @@ VERY IMPORTANT: You MUST submit your final ordering using the submit_ordering to
     await llmClient.runWithTools(
       prompt,
       systemPrompt,
-      `reordering-diffs-${recursionLimit}`, // Use a fixed log key for reordering
+      `reordering-diffs-${tag}-${recursionLimit}`, // Use a fixed log key for reordering
       ...[submitOrdering]
     );
   }
@@ -120,7 +120,6 @@ HIGH PRIORITY changes (less than 10% of all chunks) are those that:
 - Introduce significant new functionality or business logic
 - Modify critical security mechanisms (not just comments about security)
 - Change core algorithms that affect system behavior
-- Substantively alter database schemas or data handling
 - Fix critical bugs that could cause system failure or data corruption
 - Implement complex architectural changes
 
@@ -174,7 +173,7 @@ VERY IMPORTANT: You MUST report your analysis using the assign_chunk_metadata to
 
   await fs.writeFile(
     './meta.json',
-    JSON.stringify(Object.fromEntries(chunkMetadata.entries()), null, 2),
+    JSON.stringify(chunkMetadata, null, 2),
     'utf-8'
   );
 
@@ -343,7 +342,7 @@ function reorderTool(ordering: Ordering): Tool<typeof reorderSchema> {
           reorderedChunks.push(chunk);
         }
       }
-      return reorderedChunks;
+      return 'Reorder successful';
     }
   };
 }
@@ -461,17 +460,17 @@ export function topologicalSort(graph: DependencyGraph): DiffChunk[] {
   return order;
 }
 
-async function diffOrderingTool(diffPath: string, outputPath: string) {
+async function diffOrderingTool(
+  diffPath: string,
+  outputPath: string,
+  restore: boolean
+) {
   try {
-    // Extract chunks from the diff file
-    const chunks = await readDiffFile(diffPath);
-
     // Get the API key from environment
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error('ANTHROPIC_API_KEY environment variable is not set');
     }
-
     // Create a temporary LLM client and tool handler for this operation
     const tempToolHandler = new ToolHandler();
     const tempLlmClient = new LlmClient(
@@ -480,7 +479,16 @@ async function diffOrderingTool(diffPath: string, outputPath: string) {
       process.env.LOG_DIRECTORY
     );
 
-    const diffs = await getDiffSlugs(chunks, tempLlmClient);
+    let diffs: Diff[];
+    if (restore) {
+      console.log('Restoring from checkpoint...');
+      const objdiff = await fs.readFile('./meta.json', 'utf-8');
+      diffs = Object.values(JSON.parse(objdiff)) as Diff[];
+    } else {
+      const chunks = await readDiffFile(diffPath);
+
+      diffs = await getDiffSlugs(chunks, tempLlmClient);
+    }
 
     // Build a map of tags to diffs
     const tagToDiffsMap: Record<string, Diff[]> = {};
