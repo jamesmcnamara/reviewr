@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { parseDiffTool, readDiffFileTool } from '../diffTool';
+import { parseDiff, readDiffFile, readDiffFileIntoChunks, parseDiffTool, readDiffFileTool } from '../diffTool';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -18,6 +18,83 @@ index 123..456 100644
  `;
 
 describe('diffTools', () => {
+  describe('parseDiff function', () => {
+    it('should parse a diff string and split it into chunks', async () => {
+      const result = await parseDiff(sampleDiff, 10);
+      
+      expect(result).toHaveProperty('totalChunks');
+      expect(result).toHaveProperty('chunks');
+      expect(result.totalChunks).toBe(1); // Only one chunk since the diff is small
+      expect(result.chunks).toHaveLength(1);
+      expect(result.chunks[0]).toContain('diff --git');
+    });
+    
+    it('should split a diff into multiple chunks if needed', async () => {
+      // Create a longer diff by repeating the sample
+      const longDiff = sampleDiff.repeat(5);
+      
+      const result = await parseDiff(longDiff, 5);
+      
+      expect(result.totalChunks).toBeGreaterThan(1);
+      expect(result.chunks.length).toBeGreaterThan(1);
+    });
+  });
+  
+  describe('readDiffFile function', () => {
+    beforeEach(() => {
+      // Reset mocks
+      jest.resetAllMocks();
+      
+      // Mock the fs.readFile method
+      (fs.readFile as jest.Mock).mockResolvedValue(sampleDiff);
+    });
+    
+    it('should read a diff from a file', async () => {
+      const result = await readDiffFile('patches/sample.diff');
+      
+      expect(fs.readFile).toHaveBeenCalledWith(expect.any(String), 'utf-8');
+      expect(Array.isArray(result)).toBe(true);
+      expect(result[0]).toHaveProperty('chunks');
+      expect(result[0].chunks.length).toBeGreaterThan(0);
+    });
+    
+    it('should handle file read errors', async () => {
+      // Mock a file read error
+      (fs.readFile as jest.Mock).mockRejectedValue(new Error('File not found'));
+      
+      await expect(readDiffFile('nonexistent.diff'))
+        .rejects.toThrow('Failed to read diff file');
+    });
+  });
+  
+  describe('readDiffFileIntoChunks function', () => {
+    beforeEach(() => {
+      // Reset mocks
+      jest.resetAllMocks();
+      
+      // Mock the fs.readFile method
+      (fs.readFile as jest.Mock).mockResolvedValue(sampleDiff);
+    });
+    
+    it('should read a diff from a file and split it into chunks', async () => {
+      const result = await readDiffFileIntoChunks('patches/sample.diff', 10);
+      
+      expect(fs.readFile).toHaveBeenCalledWith(expect.any(String), 'utf-8');
+      expect(result).toHaveProperty('totalChunks');
+      expect(result).toHaveProperty('chunks');
+      expect(result.totalChunks).toBe(1);
+      expect(result.chunks).toHaveLength(1);
+    });
+    
+    it('should handle file read errors', async () => {
+      // Mock a file read error
+      (fs.readFile as jest.Mock).mockRejectedValue(new Error('File not found'));
+      
+      await expect(readDiffFileIntoChunks('nonexistent.diff', 10))
+        .rejects.toThrow('Failed to read diff file');
+    });
+  });
+  
   describe('parseDiffTool', () => {
     it('should parse a diff string and split it into chunks', async () => {
       const result = await parseDiffTool.execute({

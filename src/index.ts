@@ -6,7 +6,7 @@ import { ToolHandler } from './lib/toolHandler';
 import { LlmClient } from './lib/llmClient';
 import { fileTool, listFilesTool } from './tools/fileTool';
 import { diffOrderingTool } from './tools/diffOrderingTool';
-import { parseDiffTool, readDiffFileTool } from './tools/diffTool';
+import { readDiffFile } from './tools/diffTool';
 
 dotenv.config();
 
@@ -22,8 +22,6 @@ const toolHandler = new ToolHandler();
 toolHandler.registerTool(fileTool);
 toolHandler.registerTool(listFilesTool);
 toolHandler.registerTool(diffOrderingTool);
-toolHandler.registerTool(parseDiffTool);
-toolHandler.registerTool(readDiffFileTool);
 // Get log directory from environment if specified
 const logDirectory = process.env.LOG_DIRECTORY;
 
@@ -46,7 +44,11 @@ program
   .option('-k, --key <key>', 'Log key to identify this conversation in logs')
   .action(async (text, options) => {
     try {
-      const response = await llmClient.runWithTools(text, options.system, options.key);
+      const response = await llmClient.runWithTools(
+        text,
+        options.system,
+        options.key
+      );
       console.log('\nLLM Response:');
       console.log(response);
     } catch (error) {
@@ -76,21 +78,52 @@ program
   });
 
 program
+  .command('read-diff')
+  .description('Read a diff file and print as JSON')
+  .option(
+    '-p, --path <path>',
+    'Path to the diff file',
+    './patches/test-diff.diff'
+  )
+  .action(async (options) => {
+    try {
+      const result = await readDiffFile(options.path);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+      console.error(
+        'Error:',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    process.exit(0);
+  });
+
+program
   .command('order-diff')
   .description('Order a git diff file for optimal review')
-  .option('-i, --input <path>', 'Path to the input diff file', './patches/grader-patch.diff')
-  .option('-o, --output <path>', 'Path to save the ordered diff', './ordered-diff.md')
+  .option(
+    '-i, --input <path>',
+    'Path to the input diff file',
+    './patches/grader-patch.diff'
+  )
+  .option(
+    '-o, --output <path>',
+    'Path to save the ordered diff',
+    './ordered-diff.md'
+  )
   .action(async (options) => {
     try {
       console.log(`Processing diff file: ${options.input}`);
-      const result = await toolHandler.handleToolCalls([{
-        tool_name: 'order_diff',
-        parameters: {
-          diffPath: options.input,
-          outputPath: options.output
+      const result = await toolHandler.handleToolCalls([
+        {
+          tool_name: 'order_diff',
+          parameters: {
+            diffPath: options.input,
+            outputPath: options.output
+          }
         }
-      }]);
-      
+      ]);
+
       console.log(JSON.parse(result[0].content).message);
     } catch (error) {
       console.error(

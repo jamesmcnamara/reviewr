@@ -1,17 +1,9 @@
 import { z } from 'zod';
-import { Tool } from '../lib/toolHandler';
+import { Tool, ToolHandler } from '../lib/toolHandler';
 import { LlmClient } from '../lib/llmClient';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import parseDiff, { Chunk } from 'parse-diff';
-
-// Types for our dependency graph
-export interface DiffChunk {
-  id: string;
-  content: string;
-  filename: string;
-  patch?: string;
-}
+import { DiffChunk, readDiffFile } from './diffTool';
 
 export interface DependencyGraph {
   nodes: DiffChunk[];
@@ -332,79 +324,6 @@ export function topologicalSort(graph: DependencyGraph): DiffChunk[] {
   return order;
 }
 
-// Extract chunks from a git diff file
-export async function extractDiffChunks(
-  diffPath: string
-): Promise<DiffChunk[]> {
-  const diffContent = await fs.readFile(path.resolve(diffPath), 'utf-8');
-  const files = parseDiff(diffContent);
-
-  const chunks: DiffChunk[] = [];
-  let chunkCounter = 0;
-
-  for (const file of files) {
-    if (!file.chunks || file.chunks.length === 0) continue;
-
-    for (const chunk of file.chunks) {
-      const chunkId = `chunk_${++chunkCounter}`;
-      // Extract the added content (ignoring context and removed lines)
-      const chunkContent = chunk.changes
-        .map((change) => (change.type === 'add' ? change.content : ''))
-        .filter(Boolean)
-        .join('\n');
-
-      // Create the full patch for this chunk
-      const header = `@@ -${chunk.oldStart},${chunk.oldLines} +${chunk.newStart},${chunk.newLines} @@`;
-      const changes = chunk.changes
-        .map((change) => {
-          // Added lines start with +
-          if (change.type === 'add') return `+${change.content}`;
-          // Deleted lines start with -
-          if (change.type === 'del') return `-${change.content}`;
-          // Context lines start with a space
-          return ` ${change.content}`;
-        })
-        .join('\n');
-
-      const fullPatch = `${header}\n${changes}`;
-
-      chunks.push({
-        id: chunkId,
-        content: chunkContent,
-        filename: file.to || file.from || 'unknown',
-        patch: fullPatch
-      });
-    }
-  }
-
-  return chunks;
-}
-
-// Format the ordered diff chunks for human review
-export function formatOrderedDiff(orderedChunks: DiffChunk[]): string {
-  let output = '# Ordered Diff Review\n\n';
-
-  for (let i = 0; i < orderedChunks.length; i++) {
-    const chunk = orderedChunks[i];
-    output += `## ${i + 1}. ${chunk.filename}\n\n`;
-    output += '```diff\n';
-    // Make sure we include the actual content
-    if (chunk.patch) {
-      // For git diff patches, include the whole patch
-      output += chunk.patch;
-    } else if (chunk.content) {
-      // For content-only chunks, prefix with + to show as additions
-      output += chunk.content
-        .split('\n')
-        .map((line) => (line.trim() ? `+ ${line}` : line))
-        .join('\n');
-    }
-    output += '\n```\n\n';
-  }
-
-  return output;
-}
-
 const diffOrderingTool: Tool<typeof processDiffSchema> = {
   name: 'order_diff',
   description:
@@ -413,7 +332,7 @@ const diffOrderingTool: Tool<typeof processDiffSchema> = {
   execute: async (params) => {
     try {
       // Extract chunks from the diff file
-      const chunks = await extractDiffChunks(params.diffPath);
+      const chunks = await readDiffFile(params.diffPath);
 
       // Get the API key from environment
       const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -440,8 +359,5 @@ const diffOrderingTool: Tool<typeof processDiffSchema> = {
     }
   }
 };
-
-// Import the ToolHandler class for the execute function
-import { ToolHandler } from '../lib/toolHandler';
 
 export { diffOrderingTool };
