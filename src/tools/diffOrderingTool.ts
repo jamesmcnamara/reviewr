@@ -10,30 +10,108 @@ export interface DependencyGraph {
 }
 
 // Schema for processing a git diff file
-const processDiffSchema = z.object({
-  diffPath: z.string().describe('The path to the git diff file to process'),
-  outputPath: z
-    .string()
-    .optional()
-    .describe('The path to save the ordered results to')
-});
-
 // Helper function to slice a string for preview
 function truncateContent(content: string, maxLength = 200): string {
   if (content.length <= maxLength) return content;
   return content.substring(0, maxLength) + '...';
 }
 
+interface Diff {
+  id: string;
+  content: string;
+  filename: string;
+  patch?: string;
+  tags: string[];
+  priority: 'high' | 'low' | 'unknown';
+}
+
+export async function orderChunksForTag(
+  llmClient: LlmClient,
+  chunks: Diff[],
+  tag: string
+): Promise<Diff[]> {
+  const systemPrompt = `You are an expert code reviewer assistant specializing in organizing related code changes into a coherent narrative. Your task is to analyze a set of diff chunks that all relate to a single concept (identified by a tag like 'user-repository', 'security', or 'query parser') and determine the optimal order in which they should be reviewed.
+
+When ordering the diffs, follow these principles to create a logical progression that tells a coherent story:
+
+1. FOUNDATIONAL CHANGES FIRST:
+   - Start with architecture/interface definitions that other changes depend on
+   - Place core implementation before code that uses it
+   - Position changes to data models or schemas early when they define structure
+
+2. FOLLOW DEVELOPMENT FLOW:
+   - Implementation of new functionality should precede its tests
+   - Tests should come before downstream adaptations to the new functionality
+   - Configuration changes should precede their usage
+
+3. DEPENDENCY ORDER:
+   - If change B depends on change A, place A before B
+   - If understanding change Y requires knowledge from change X, place X before Y
+
+4. END WITH PERIPHERAL/MECHANICAL CHANGES:
+   - Place generated code last
+   - Put purely mechanical refactors toward the end
+   - Documentation updates typically come after their referenced implementation
+
+5. GROUP RELATED FILES:
+   - Keep changes to the same component or feature together
+   - Front-end and back-end pairs can be grouped (API endpoint then its UI)
+
+For example, when reviewing a new feature, an ideal order might be:
+1. Interface/API definitions
+2. Core implementation of the feature
+3. Tests for the new implementation
+4. Updates to existing components that use the new feature
+5. Database migrations or schema changes
+6. Updates to HTTP handlers or API endpoints
+7. Documentation or comment updates
+8. Generated code changes
+
+You will receive a series of diff chunks, each with a unique ID. Your task is to analyze these diffs and determine the optimal review order of their IDs.
+
+VERY IMPORTANT: You MUST submit your final ordering using the submit_ordering tool with the list of diff IDs in the recommended review sequence.
+  `;
+
+  let prompt = `All of the following chunks are related to ${tag}\n`;
+  for (const diff of chunks) {
+    prompt += `<diff id="${diff.id}">${diff.patch}</diff>\n`;
+  }
+  const ordering = {
+    done: false,
+    ordering: chunks
+  };
+  const submitOrdering = reorderTool(ordering);
+
+  let recursionLimit = 5;
+
+  while (!ordering.done && recursionLimit-- > 0) {
+    await llmClient.runWithTools(
+      prompt,
+      systemPrompt,
+      `reordering-diffs-${recursionLimit}`, // Use a fixed log key for reordering
+      ...[submitOrdering]
+    );
+  }
+  if (recursionLimit == 0) {
+    console.error('Recursion limit reached, aborting');
+  }
+  return ordering.ordering;
+}
+
 export async function getDiffSlugs(
   chunks: DiffChunk[],
   llmClient: LlmClient
-): Promise<Map<string, ChunkMeta>> {
+): Promise<Diff[]> {
   if (!chunks.length) {
-    return new Map();
+    return [];
   }
-  const chunkMetadata: Map<string, ChunkMeta> = new Map();
+  const chunkMetadata: Diff[] = [];
   const tags = new Set<string>();
-  const assignChunkMetadata = assignChunkMetadataTool(chunkMetadata, tags);
+  const assignChunkMetadata = assignChunkMetadataTool(
+    chunkMetadata,
+    tags,
+    chunks
+  );
   const systemPrompt = `You are an expert code analyst. Your task is to analyze a diff chunk and determine a set of tags that describe the responsibilities of the code change within. You will also see a list of existing tags that previous chunks have reported. If the tags you determine are similar to any of the existing tags, you should use the existing tags instead to allow grouping.
 
 Additionally, you must report the priority of the chunk as either 'high', 'low', or 'unknown' based on the following criteria:
@@ -228,6 +306,48 @@ function reportDependenciesTool(
   };
 }
 
+// Define the schema for the parse_diff tool parameters
+const reorderSchema = z.object({
+  order: z
+    .array(z.string())
+    .describe(
+      'A list of ids of the chunks provided in the order they should be reviewed to be most intelligible'
+    ),
+  done: z
+    .boolean()
+    .describe(
+      'pass true for this value if the order provided in the prompt is already the best linear ordering of the information'
+    )
+});
+
+// Tool to parse and split a diff string into chunks
+
+interface Ordering {
+  ordering: Diff[];
+  done: boolean;
+}
+function reorderTool(ordering: Ordering): Tool<typeof reorderSchema> {
+  return {
+    name: 'reorder',
+    description: 'Reorder a list of diff chunks',
+    schema: reorderSchema,
+    execute: async (params) => {
+      if (params.done) {
+        ordering.done = true;
+        return;
+      }
+      const reorderedChunks: DiffChunk[] = [];
+      for (const id of params.order) {
+        const chunk = ordering.ordering.find((c) => c.id === id);
+        if (chunk) {
+          reorderedChunks.push(chunk);
+        }
+      }
+      return reorderedChunks;
+    }
+  };
+}
+
 const assignChunkMetadataSchema = z.object({
   tags: z
     .array(z.string())
@@ -242,25 +362,25 @@ const assignChunkMetadataSchema = z.object({
     .describe('The ID of the diff chunk whose dependencies are being reported')
 });
 
-interface ChunkMeta {
-  tags: string[];
-  priority: 'high' | 'low' | 'unknown';
-}
-
 // Tool to parse and split a diff string into chunks
 function assignChunkMetadataTool(
-  meta: Map<string, ChunkMeta>,
-  tags: Set<string>
+  meta: Diff[],
+  tags: Set<string>,
+  diffs: DiffChunk[]
 ): Tool<typeof assignChunkMetadataSchema> {
   return {
     name: 'assign_chunk_metadata',
     description: 'Associate a diff chunk with a list of tags',
     schema: assignChunkMetadataSchema,
     execute: async (params) => {
-      meta.set(params.chunkId, {
-        tags: params.tags,
-        priority: params.priority
-      });
+      const diffChunk = diffs.find((chunk) => chunk.id === params.chunkId);
+      if (diffChunk) {
+        meta.push({
+          ...diffChunk,
+          tags: params.tags,
+          priority: params.priority
+        });
+      }
       for (const tag of params.tags) {
         tags.add(tag);
       }
@@ -341,40 +461,67 @@ export function topologicalSort(graph: DependencyGraph): DiffChunk[] {
   return order;
 }
 
-const diffOrderingTool: Tool<typeof processDiffSchema> = {
-  name: 'order_diff',
-  description:
-    'Process a git diff file and order the chunks for optimal review',
-  schema: processDiffSchema,
-  execute: async (params) => {
-    try {
-      // Extract chunks from the diff file
-      const chunks = await readDiffFile(params.diffPath);
+async function diffOrderingTool(diffPath: string, outputPath: string) {
+  try {
+    // Extract chunks from the diff file
+    const chunks = await readDiffFile(diffPath);
 
-      // Get the API key from environment
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        throw new Error('ANTHROPIC_API_KEY environment variable is not set');
+    // Get the API key from environment
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY environment variable is not set');
+    }
+
+    // Create a temporary LLM client and tool handler for this operation
+    const tempToolHandler = new ToolHandler();
+    const tempLlmClient = new LlmClient(
+      apiKey,
+      tempToolHandler,
+      process.env.LOG_DIRECTORY
+    );
+
+    const diffs = await getDiffSlugs(chunks, tempLlmClient);
+
+    // Build a map of tags to diffs
+    const tagToDiffsMap: Record<string, Diff[]> = {};
+
+    // Populate the map
+    for (const diff of diffs) {
+      for (const tag of diff.tags) {
+        if (!tagToDiffsMap[tag]) {
+          tagToDiffsMap[tag] = [];
+        }
+        tagToDiffsMap[tag].push(diff);
       }
+    }
 
-      // Create a temporary LLM client and tool handler for this operation
-      const tempToolHandler = new ToolHandler();
-      const tempLlmClient = new LlmClient(
-        apiKey,
-        tempToolHandler,
-        process.env.LOG_DIRECTORY
-      );
-
-      await getDiffSlugs(chunks, tempLlmClient);
-      process.exit(0);
-    } catch (error) {
-      throw new Error(
-        `Failed to process diff: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+    // Process each tag with orderChunksForTag
+    const orderedResults: Record<string, Diff[]> = {};
+    for (const tag of Object.keys(tagToDiffsMap)) {
+      console.log(`Ordering diffs for tag: ${tag}`);
+      orderedResults[tag] = await orderChunksForTag(
+        tempLlmClient,
+        tagToDiffsMap[tag],
+        tag
       );
     }
+
+    // Save the results if outputPath is provided
+    await fs.writeFile(
+      outputPath,
+      JSON.stringify(orderedResults, null, 2),
+      'utf-8'
+    );
+    console.log(`Ordered results saved to ${outputPath}`);
+
+    return orderedResults;
+  } catch (error) {
+    throw new Error(
+      `Failed to process diff: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
-};
+}
 
 export { diffOrderingTool };

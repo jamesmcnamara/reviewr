@@ -21,7 +21,6 @@ if (!apiKey) {
 const toolHandler = new ToolHandler();
 toolHandler.registerTool(fileTool);
 toolHandler.registerTool(listFilesTool);
-toolHandler.registerTool(diffOrderingTool);
 // Get log directory from environment if specified
 const logDirectory = process.env.LOG_DIRECTORY;
 
@@ -114,17 +113,7 @@ program
   .action(async (options) => {
     try {
       console.log(`Processing diff file: ${options.input}`);
-      const result = await toolHandler.handleToolCalls([
-        {
-          tool_name: 'order_diff',
-          parameters: {
-            diffPath: options.input,
-            outputPath: options.output
-          }
-        }
-      ]);
-
-      console.log(JSON.parse(result[0].content).message);
+      await diffOrderingTool(options.input, options.output);
     } catch (error) {
       console.error(
         'Error:',
