@@ -1,0 +1,2408 @@
+diff --git a/.sourcegraph/memory.md b/.sourcegraph/memory.md
+index 239b9a172735..31e1a97a6342 100644
+--- a/.sourcegraph/memory.md
++++ b/.sourcegraph/memory.md
+@@ -1,10 +1,11 @@
+ # Command Reference
+ 
+ ## Build and Test Commands
+-- Build worker: `go build ./cmd/worker`
+-- Build symbols: `go build ./cmd/symbols`
+-- Build searcher: `go build ./cmd/searcher`
+-- Build frontend: `go build ./cmd/frontend`
++- Build worker: `go build github.com/sourcegraph/sourcegraph/cmd/worker`
++- Build symbols: `go build github.com/sourcegraph/sourcegraph/cmd/symbols`
++- Build searcher: `go build github.com/sourcegraph/sourcegraph/cmd/searcher`
++- Build frontend: `go build github.com/sourcegraph/sourcegraph/cmd/frontend`
++- Run tests for a specific package: `go test github.com/sourcegraph/sourcegraph/internal/[package]`
+ 
+ ## Linting and Checking Commands
+ - Get diagnostics for a file: `get_diagnostics [path]`
+diff --git a/cmd/frontend/internal/agentapi/classifier.go b/cmd/frontend/internal/agentapi/classifier.go
+index 2e8ba5d98be4..42d89b75473c 100644
+--- a/cmd/frontend/internal/agentapi/classifier.go
++++ b/cmd/frontend/internal/agentapi/classifier.go
+@@ -60,17 +60,15 @@ func (c *classificationHandler) processConversations(ctx context.Context, change
+ 		PageSize: c.pageSize,
+ 		FetchNextPage: func(ctx context.Context, paginationArgs paginate.PaginationArgs) (*paginate.Page[goapi.Conversation], error) {
+ 			return c.db.Conversations().List(ctx, database.ConversationListOptions{
+-				ChangesetId:     &changesetID,
+-				IsDiagnostic:    pointers.Ptr(true),
+-				Conversations:   paginationArgs,
+-				IncludeMessages: true,
+-				Messages: database.PaginationArgs{
++				ChangesetId:   core.Some(changesetID),
++				IsDiagnostic:  core.Some(true),
++				Conversations: paginationArgs,
++				Messages: core.Some(database.PaginationArgs{
+ 					First: &c.pageSize,
+-				},
+-				IncludeReactions: true,
+-				Reactions: database.PaginationArgs{
++				}),
++				Reactions: core.Some(database.PaginationArgs{
+ 					First: &c.pageSize,
+-				},
++				}),
+ 			})
+ 		},
+ 		// Get the diagnostics for the conversations in the current page
+@@ -117,9 +115,9 @@ func (c *classificationHandler) processMessages(ctx context.Context, conversatio
+ 		InitialItems: core.MaybePtr(conversation.Messages),
+ 		FetchNextPage: func(ctx context.Context, paginationArgs paginate.PaginationArgs) (*paginate.Page[goapi.ConversationMessage], error) {
+ 			return c.db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-				ConversationId:   &conversation.Id,
+-				Messages:         paginationArgs,
+-				IncludeReactions: false,
++				ConversationId: core.Some(conversation.Id),
++				Messages:       paginationArgs,
++				Reactions:      core.Some(database.PaginationArgs{}),
+ 			})
+ 		},
+ 		ProcessItem: func(ctx context.Context, message goapi.ConversationMessage) error {
+@@ -182,7 +180,7 @@ func (c *classificationHandler) processReactions(ctx context.Context, message go
+ 		InitialItems: core.MaybePtr(message.Reactions),
+ 		FetchNextPage: func(ctx context.Context, paginationArgs paginate.PaginationArgs) (*paginate.Page[goapi.ConversationMessageReaction], error) {
+ 			return c.db.Conversations().ListReactions(ctx, database.ConversationMessageReactionListOptions{
+-				MessageId: &message.Id,
++				MessageId: core.Some(message.Id),
+ 				Reactions: paginationArgs,
+ 			})
+ 		},
+diff --git a/cmd/frontend/internal/agentapi/comments.go b/cmd/frontend/internal/agentapi/comments.go
+index 38ce2e6821a6..5d75a9b25c63 100644
+--- a/cmd/frontend/internal/agentapi/comments.go
++++ b/cmd/frontend/internal/agentapi/comments.go
+@@ -19,6 +19,7 @@ import (
+ 	"github.com/sourcegraph/sourcegraph/internal/errcode"
+ 	"github.com/sourcegraph/sourcegraph/internal/openapi/goapi"
+ 	"github.com/sourcegraph/sourcegraph/internal/review/classifier"
++	"github.com/sourcegraph/sourcegraph/lib/core"
+ 	"github.com/sourcegraph/sourcegraph/lib/errors"
+ 	"github.com/sourcegraph/sourcegraph/lib/pointers"
+ )
+@@ -84,7 +85,7 @@ func (h *commentsHandler) handleCommentForAgent(
+ 
+ 	if comment.InReplyTo != 0 {
+ 		parent, err := h.db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+-			ExternalServiceId: pointers.Ptr(strconv.Itoa(int(comment.InReplyTo))),
++			ExternalServiceId: core.Some(strconv.Itoa(int(comment.InReplyTo))),
+ 		})
+ 		if err != nil {
+ 			if errcode.IsNotFound(err) {
+diff --git a/cmd/frontend/internal/agentapi/handler_agent.go b/cmd/frontend/internal/agentapi/handler_agent.go
+index 28a751f2cb6d..78cf30021a11 100644
+--- a/cmd/frontend/internal/agentapi/handler_agent.go
++++ b/cmd/frontend/internal/agentapi/handler_agent.go
+@@ -243,10 +243,9 @@ func (h *agentsHandler) HandleRetrieveAgent(w http.ResponseWriter, r *http.Reque
+ 		}
+ 		h.logger.Info("conversationsPagination", sglog.Intp("page_size", conversationsPagination.First), sglog.String("review_ids", strings.Join(reviewIDStrings, ",")))
+ 		conversations, err := h.db.Conversations().List(r.Context(), database.ConversationListOptions{
+-			ReviewIds:       reviewIDs,
+-			Conversations:   conversationsPagination,
+-			IncludeMessages: true,
+-			Messages:        messagesPagination,
++			ReviewIds:     core.Some(reviewIDs),
++			Conversations: conversationsPagination,
++			Messages:      core.Some(messagesPagination),
+ 		})
+ 		if err != nil {
+ 			return errcode.NewJSONHTTPErr(err, "db_conversations_list", http.StatusInternalServerError)
+diff --git a/cmd/frontend/internal/agentapi/handler_webhook_github_app_test.go b/cmd/frontend/internal/agentapi/handler_webhook_github_app_test.go
+index d0dd2e640ce8..57cb951ef5da 100644
+--- a/cmd/frontend/internal/agentapi/handler_webhook_github_app_test.go
++++ b/cmd/frontend/internal/agentapi/handler_webhook_github_app_test.go
+@@ -23,6 +23,7 @@ import (
+ 	"github.com/sourcegraph/sourcegraph/internal/review"
+ 	"github.com/sourcegraph/sourcegraph/internal/telemetry/telemetrytest"
+ 	"github.com/sourcegraph/sourcegraph/internal/types"
++	"github.com/sourcegraph/sourcegraph/lib/core"
+ 	"github.com/sourcegraph/sourcegraph/lib/errors"
+ 	"github.com/sourcegraph/sourcegraph/lib/pointers"
+ )
+@@ -548,7 +549,7 @@ func TestHandleGitHubWebhookComments(t *testing.T) {
+ 		err := handler.handleGitHubWebhook(ctx, "https://github.com", commentEvent)
+ 		require.NoError(t, err)
+ 
+-		conv, err := conversations.Get(ctx, database.ConversationListOptions{IncludeMessages: true})
++		conv, err := conversations.Get(ctx, database.ConversationListOptions{Messages: core.Some(database.PaginationArgs{})})
+ 		require.NoError(t, err)
+ 		require.Equal(t, "pull_request", conv.Kind)
+ 		require.NotNil(t, conv.Messages)
+@@ -603,8 +604,8 @@ func TestHandleGitHubWebhookComments(t *testing.T) {
+ 		require.NoError(t, handler.handleGitHubWebhook(ctx, "https://github.com", commentEvent))
+ 
+ 		msg, err := conversations.GetMessage(ctx, database.ConversationMessageListOptions{
+-			ConversationId:    &conv.Id,
+-			ExternalServiceId: github.String("124"),
++			ConversationId:    core.Some(conv.Id),
++			ExternalServiceId: core.Some("124"),
+ 		})
+ 		require.NoError(t, err)
+ 
+@@ -679,7 +680,7 @@ func TestHandleGitHubWebhookComments(t *testing.T) {
+ 			require.NoError(t, err)
+ 
+ 			convs, err := conversations.List(ctx, database.ConversationListOptions{
+-				IncludeMessages: true,
++				Messages: core.Some(database.PaginationArgs{}),
+ 			})
+ 			require.NoError(t, err)
+ 			require.Len(t, convs.Nodes, 1)
+@@ -781,7 +782,7 @@ func TestHandleGitHubWebhookComments(t *testing.T) {
+ 		require.NoError(t, err)
+ 
+ 		convs, err := conversations.List(ctx, database.ConversationListOptions{
+-			IncludeMessages: true,
++			Messages: core.Some(database.PaginationArgs{}),
+ 		})
+ 		require.NoError(t, err)
+ 		require.Len(t, convs.Nodes, 1)
+diff --git a/cmd/frontend/internal/conversationapi/BUILD.bazel b/cmd/frontend/internal/conversationapi/BUILD.bazel
+index c9594214c687..62f055b11317 100644
+--- a/cmd/frontend/internal/conversationapi/BUILD.bazel
++++ b/cmd/frontend/internal/conversationapi/BUILD.bazel
+@@ -16,9 +16,10 @@ go_library(
+         "//internal/errcode",
+         "//internal/openapi/goapi",
+         "//internal/paginate",
++        "//internal/queryparams",
+         "//internal/telemetry",
+         "//internal/telemetry/telemetryrecorder",
+-        "//lib/errors",
++        "//lib/core",
+         "@com_github_gorilla_mux//:mux",
+         "@com_github_sourcegraph_log//:log",
+     ],
+@@ -38,6 +39,7 @@ go_test(
+         "//internal/database/fakedb",
+         "//internal/openapi/goapi",
+         "//internal/paginate",
++        "//lib/core",
+         "@com_github_gorilla_mux//:mux",
+         "@com_github_hexops_autogold_v2//:autogold",
+         "@com_github_hexops_valast//:valast",
+diff --git a/cmd/frontend/internal/conversationapi/handler_conversation.go b/cmd/frontend/internal/conversationapi/handler_conversation.go
+index e2bc5f9a5a3f..6c716246403f 100644
+--- a/cmd/frontend/internal/conversationapi/handler_conversation.go
++++ b/cmd/frontend/internal/conversationapi/handler_conversation.go
+@@ -3,8 +3,6 @@ package conversationapi
+ import (
+ 	"encoding/json"
+ 	"net/http"
+-	"net/url"
+-	"strconv"
+ 
+ 	sglog "github.com/sourcegraph/log"
+ 
+@@ -13,8 +11,9 @@ import (
+ 	"github.com/sourcegraph/sourcegraph/internal/errcode"
+ 	"github.com/sourcegraph/sourcegraph/internal/openapi/goapi"
+ 	"github.com/sourcegraph/sourcegraph/internal/paginate"
++	"github.com/sourcegraph/sourcegraph/internal/queryparams"
+ 	"github.com/sourcegraph/sourcegraph/internal/telemetry"
+-	"github.com/sourcegraph/sourcegraph/lib/errors"
++	"github.com/sourcegraph/sourcegraph/lib/core"
+ )
+ 
+ type conversationHandler struct {
+@@ -23,7 +22,6 @@ type conversationHandler struct {
+ 	db     database.DB
+ }
+ 
+-// This does no permission checking and thusly is blocked until CODY-4733 is merged
+ func (h *conversationHandler) HandleCreateConversation(w http.ResponseWriter, r *http.Request) error {
+ 	var request goapi.Conversation
+ 	err := json.NewDecoder(r.Body).Decode(&request)
+@@ -49,7 +47,8 @@ func (h *conversationHandler) HandleCreateConversation(w http.ResponseWriter, r
+ }
+ 
+ func (h *conversationHandler) HandleGetConversations(w http.ResponseWriter, r *http.Request) error {
+-	listOpts, err := parseListOpts(r.URL.Query())
++	params := queryparams.NewQueryParams(r.URL.Query())
++	listOpts, err := parseListOpts(params)
+ 	if err != nil {
+ 		return errcode.NewJSONHTTPErr(err, "parseListOpts()", http.StatusBadRequest)
+ 	}
+@@ -73,73 +72,44 @@ func (h *conversationHandler) HandleGetConversations(w http.ResponseWriter, r *h
+ 	return nil
+ }
+ 
+-func parseListOpts(query url.Values) (database.ConversationListOptions, error) {
+-	opts := database.ConversationListOptions{}
++var conversationListOptsParser = queryparams.NewQueryParamParser[database.ConversationListOptions]()
+ 
+-	// Parse filters
+-	if kind := query.Get("filter_kind"); kind != "" {
+-		opts.Kind = &kind
+-	}
+-
+-	if agentID := query.Get("filter_agent_id"); agentID != "" {
+-		id, err := strconv.ParseInt(agentID, 10, 32)
+-		if err != nil {
+-			return database.ConversationListOptions{}, errors.Newf("invalid agent_id: %w", err)
+-		}
+-		id32 := int32(id)
+-		opts.AgentId = &id32
+-	}
+-
+-	if userID := query.Get("filter_user_id"); userID != "" {
+-		id, err := strconv.ParseInt(userID, 10, 32)
+-		if err != nil {
+-			return database.ConversationListOptions{}, errors.Newf("invalid user_id: %w", err)
+-		}
+-		id32 := int32(id)
+-		opts.UserId = &id32
+-	}
+-
+-	if diagnosticID := query.Get("filter_diagnostic_id"); diagnosticID != "" {
+-		id, err := strconv.ParseInt(diagnosticID, 10, 32)
+-		if err != nil {
+-			return database.ConversationListOptions{}, errors.Newf("invalid diagnostic_id: %w", err)
+-		}
+-		id32 := int32(id)
+-		opts.DiagnosticId = &id32
+-	}
+-
+-	if reviewID := query.Get("filter_review_id"); reviewID != "" {
+-		id, err := strconv.ParseInt(reviewID, 10, 32)
+-		if err != nil {
+-			return database.ConversationListOptions{}, errors.Newf("invalid review_id: %w", err)
+-		}
+-		id32 := int32(id)
+-		opts.ReviewId = &id32
+-	}
+-
+-	if pullRequestID := query.Get("filter_pull_request_id"); pullRequestID != "" {
+-		id, err := strconv.ParseInt(pullRequestID, 10, 32)
+-		if err != nil {
+-			return database.ConversationListOptions{}, errors.Newf("invalid pull_request_id: %w", err)
+-		}
+-		opts.PullRequestId = &id
++func parseListOpts(query *queryparams.QueryParams) (database.ConversationListOptions, error) {
++	opts, err := conversationListOptsParser.Parse(query)
++	if err != nil {
++		return database.ConversationListOptions{}, err
+ 	}
+ 
+ 	// Parse pagination
+-	conversation, err := goapi.ParseCursorPaginationForID(query, "")
++	conversation, err := goapi.ParseCursorPagination(goapi.ParseQueryParamSettings{
++		Prefix: "",
++		Query:  query.URL,
++		Parsers: map[string]goapi.CursorParser[any]{
++			"id":         goapi.ParseCursorInt32,
++			"created_at": goapi.ParseCursorDateTime,
++		},
++		DefaultSort: "-created_at",
++	})
+ 	if err != nil {
+ 		return database.ConversationListOptions{}, err
+ 	}
+ 	opts.Conversations = paginate.PaginationFromCursorAPI(conversation)
+ 
+-	if query.Get("include") == "messages" {
+-		opts.IncludeMessages = true
+-		messages, err := goapi.ParseCursorPaginationForID(query, "messages")
++	if query.Includes("messages") {
++		messages, err := goapi.ParseCursorPaginationForID(query.URL, "messages")
++		if err != nil {
++			return database.ConversationListOptions{}, err
++		}
++		opts.Messages = core.Some(paginate.PaginationFromCursorAPI(messages))
++	}
++	if query.Includes("reactions") {
++		reactions, err := goapi.ParseCursorPaginationForID(query.URL, "reactions")
+ 		if err != nil {
+ 			return database.ConversationListOptions{}, err
+ 		}
+-		opts.Messages = paginate.PaginationFromCursorAPI(messages)
++		opts.Reactions = core.Some(paginate.PaginationFromCursorAPI(reactions))
+ 	}
++	opts.EnforceAuthz = true
+ 	return opts, nil
+ }
+ 
+diff --git a/cmd/frontend/internal/conversationapi/handler_conversation_test.go b/cmd/frontend/internal/conversationapi/handler_conversation_test.go
+index 48c3e3cbfc16..5c3ffaf8be85 100644
+--- a/cmd/frontend/internal/conversationapi/handler_conversation_test.go
++++ b/cmd/frontend/internal/conversationapi/handler_conversation_test.go
+@@ -6,6 +6,7 @@ import (
+ 	"encoding/json"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
+ 	"testing"
+ 
+ 	"github.com/gorilla/mux"
+@@ -20,10 +21,12 @@ import (
+ 	"github.com/sourcegraph/sourcegraph/internal/database/fakedb"
+ 	"github.com/sourcegraph/sourcegraph/internal/openapi/goapi"
+ 	"github.com/sourcegraph/sourcegraph/internal/paginate"
++	"github.com/sourcegraph/sourcegraph/lib/core"
+ )
+ 
+ func TestMain(m *testing.M) {
+ 	logtest.Init(m)
++	os.Exit(m.Run())
+ }
+ 
+ // Creates a new mockdb but automatically wires in the in-mem
+@@ -69,7 +72,7 @@ func TestHandleCreateConversation(t *testing.T) {
+ 
+ 	// DB checks
+ 	ctx := context.Background()
+-	retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{ConversationId: &response.Id})
++	retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{ConversationId: core.Some(response.Id)})
+ 	require.NoError(t, err)
+ 	require.Equal(t, response, retrieved)
+ }
+@@ -99,13 +102,21 @@ func TestHandleGetConversations(t *testing.T) {
+ 		"filter_review_id=234&"+
+ 		"filter_rule_id=test-rule&"+
+ 		"filter_pull_request_id=8910&"+
++		"filter_changeset_id=1234&"+
++		"filter_external_service_id=test-external-service&"+
++		"filter_external_api_url=test-external-api-url&"+
++		"filter_external_html_url=test-external-html-url&"+
+ 		"include=messages&"+
++		"include=reactions&"+
+ 		"page_first=50&"+
+ 		"page_after=1000&"+
+-		"sort=-created_at&"+
++		"sort=-id&"+
+ 		"messages.page_first=25&"+
+ 		"messages.page_after=500&"+
+-		"messages.sort=-id", nil)
++		"messages.sort=-id&"+
++		"reactions.page_first=25&"+
++		"reactions.page_after=500&"+
++		"reactions.sort=-id", nil)
+ 	w := httptest.NewRecorder()
+ 	router.ServeHTTP(w, req)
+ 
+@@ -121,22 +132,37 @@ func TestHandleGetConversations(t *testing.T) {
+ 	calls := conversations.ListFunc.History()
+ 	require.Len(t, calls, 1)
+ 	autogold.Expect(database.ConversationListOptions{
+-		Kind:          valast.Ptr("test"),
+-		AgentId:       valast.Ptr(int32(123)),
+-		UserId:        valast.Ptr(int32(456)),
+-		DiagnosticId:  valast.Ptr(int32(789)),
+-		ReviewId:      valast.Ptr(int32(234)),
+-		PullRequestId: valast.Ptr(int64(8910)),
+-		Conversations: database.PaginationArgs{
++		EnforceAuthz:      true,
++		Kind:              core.Some("test"),
++		AgentId:           core.Some(int32(123)),
++		UserId:            core.Some(int32(456)),
++		DiagnosticId:      core.Some(int32(789)),
++		ReviewId:          core.Some(int32(234)),
++		ChangesetId:       core.Some(int32(1234)),
++		PullRequestId:     core.Some(int64(8910)),
++		ExternalApiUrl:    core.Some("test-external-api-url"),
++		ExternalHtmlUrl:   core.Some("test-external-html-url"),
++		ExternalServiceId: core.Some("test-external-service"),
++		Conversations: paginate.PaginationArgs{
+ 			First:   valast.Ptr(50),
+-			After:   []any{1000},
+-			OrderBy: database.OrderBy{database.OrderByOption{Field: "created_at"}},
++			After:   []interface{}{1000},
++			OrderBy: paginate.OrderBy{paginate.OrderByOption{Field: "id"}},
+ 		},
+-		Messages: database.PaginationArgs{
+-			First:   valast.Ptr(25),
+-			After:   []any{500},
+-			OrderBy: database.OrderBy{database.OrderByOption{Field: "id"}},
+-		},
+-		IncludeMessages: true,
++		Messages: core.Some(paginate.PaginationArgs{
++			First: valast.Ptr(25),
++			After: []interface{}{500},
++			OrderBy: paginate.OrderBy{paginate.OrderByOption{
++				Field:     "id",
++				Ascending: true,
++			}},
++		}),
++		Reactions: core.Some(paginate.PaginationArgs{
++			First: valast.Ptr(25),
++			After: []any{500},
++			OrderBy: paginate.OrderBy{paginate.OrderByOption{
++				Field:     "id",
++				Ascending: true,
++			}},
++		}),
+ 	}).Equal(t, calls[0].Arg1)
+ }
+diff --git a/cmd/frontend/internal/reviewapi/gitserver.go b/cmd/frontend/internal/reviewapi/gitserver.go
+index 5efbac0130a0..ecc708b6048c 100644
+--- a/cmd/frontend/internal/reviewapi/gitserver.go
++++ b/cmd/frontend/internal/reviewapi/gitserver.go
+@@ -118,7 +118,7 @@ func readString(ctx context.Context, git gitserver.Client, repoID api.RepoID, co
+ func getUniqueChangedPaths(review goapi.Review, pathsFilter map[string]bool) []string {
+ 	pathSet := map[string]bool{}
+ 	for _, diagnostic := range pointers.DerefZero(review.Diagnostics) {
+-		if pathsFilter != nil && !pathsFilter[diagnostic.Location.Path] {
++		if len(pathsFilter) > 0 && !pathsFilter[diagnostic.Location.Path] {
+ 			continue
+ 		}
+ 		pathSet[diagnostic.Location.Path] = true
+diff --git a/cmd/frontend/internal/reviewapi/gitserver_test.go b/cmd/frontend/internal/reviewapi/gitserver_test.go
+index 6c6e513358c5..e4e9a7b42539 100644
+--- a/cmd/frontend/internal/reviewapi/gitserver_test.go
++++ b/cmd/frontend/internal/reviewapi/gitserver_test.go
+@@ -53,7 +53,11 @@ export function greeting(): string {
+ 		require.NoError(t, err)
+ 		require.Equal(t, 1, len(diffs))
+ 		autogold.Expect([]goapi.FileDiff{{
+-			NewName: valast.Ptr("src/app/index.ts"),
++			RepoId:   1,
++			RepoName: "github.com/sourcegraph/sourcegraph",
++			OldSha:   valast.Ptr("main"),
++			NewSha:   valast.Ptr("mybranch"),
++			NewName:  valast.Ptr("src/app/index.ts"),
+ 			NewContent: valast.Ptr(`
+ export function greeting(): string {
+     return 'Hello guys!'.at(1);
+@@ -79,7 +83,11 @@ export function greeting(): string {
+ 		require.NoError(t, err)
+ 		require.Equal(t, 1, len(diffs))
+ 		autogold.Expect([]goapi.FileDiff{{
+-			OldName: valast.Ptr("src/app/index.ts"),
++			RepoId:   1,
++			RepoName: "github.com/sourcegraph/sourcegraph",
++			OldSha:   valast.Ptr("main"),
++			NewSha:   valast.Ptr("mybranch"),
++			OldName:  valast.Ptr("src/app/index.ts"),
+ 			OldContent: valast.Ptr(`
+ export function greeting(): string {
+     return 'Hello guys!'.at(1);
+@@ -115,8 +123,12 @@ export function greeting(): string {
+ 		require.NoError(t, err)
+ 		require.Equal(t, 1, len(diffs))
+ 		autogold.Expect([]goapi.FileDiff{{
+-			OldName: valast.Ptr("src/app/main.ts"),
+-			NewName: valast.Ptr("src/app/index.ts"),
++			RepoId:   1,
++			RepoName: "github.com/sourcegraph/sourcegraph",
++			OldSha:   valast.Ptr("main"),
++			NewSha:   valast.Ptr("mybranch"),
++			OldName:  valast.Ptr("src/app/main.ts"),
++			NewName:  valast.Ptr("src/app/index.ts"),
+ 			OldContent: valast.Ptr(`
+ export function greeting(): string {
+     return 'Hello guys!'.at(1);
+diff --git a/cmd/frontend/internal/reviewapi/handler_review.go b/cmd/frontend/internal/reviewapi/handler_review.go
+index 56bcefe2f86f..f90eeb8e977d 100644
+--- a/cmd/frontend/internal/reviewapi/handler_review.go
++++ b/cmd/frontend/internal/reviewapi/handler_review.go
+@@ -116,33 +116,14 @@ func (h *reviewHandler) HandleRetrieveReviews(w http.ResponseWriter, r *http.Req
+ 	return nil
+ }
+ 
+-func parseListOpts(params *queryparams.QueryParams) (database.ReviewListOptions, error) {
+-	opts := database.ReviewListOptions{
+-		EnforceAuthz: true,
+-	}
+-
+-	// Parse pull request API URL filter
+-	if prURL := params.URL.Get("filter_pull_request_api_url"); prURL != "" {
+-		opts.PullRequestApiUrl = core.Some(prURL)
+-	}
+-
+-	if agentID := params.URL.Get("filter_agent_id"); agentID != "" {
+-		agentIDInt, err := strconv.Atoi(agentID)
+-		if err != nil {
+-			return database.ReviewListOptions{}, errors.New("invalid agent_id")
+-		}
+-		opts.AgentId = core.Some(int32(agentIDInt))
+-	}
++var listOptsMapper = queryparams.NewQueryParamParser[database.ReviewListOptions]()
+ 
+-	if reviewID := params.URL.Get("filter_review_id"); reviewID != "" {
+-		reviewIDInt, err := strconv.Atoi(reviewID)
+-		if err != nil {
+-			return database.ReviewListOptions{}, errors.New("invalid review_id")
+-		}
+-		opts.ReviewIds = core.Some([]int32{int32(reviewIDInt)})
++func parseListOpts(params *queryparams.QueryParams) (database.ReviewListOptions, error) {
++	opts, err := listOptsMapper.Parse(params)
++	if err != nil {
++		return database.ReviewListOptions{}, err
+ 	}
+-
+-	// Parse review pagination
++	opts.EnforceAuthz = true
+ 	reviews, err := goapi.ParseCursorPagination(goapi.ParseQueryParamSettings{
+ 		Prefix: "",
+ 		Query:  params.URL,
+@@ -168,7 +149,6 @@ func parseListOpts(params *queryparams.QueryParams) (database.ReviewListOptions,
+ 		}
+ 		opts.Diagnostics = paginate.PaginationFromCursorAPI(diagnostics)
+ 	}
+-
+ 	return opts, nil
+ }
+ 
+@@ -381,65 +361,23 @@ func (h *reviewHandler) HandleListDiagnostics(w http.ResponseWriter, r *http.Req
+ 	return nil
+ }
+ 
+-func parseDiagnosticListOpts(params *queryparams.QueryParams) (database.DiagnosticListOptions, error) {
+-	opts := database.DiagnosticListOptions{
+-		EnforceAuthz: true,
+-	}
+-
+-	// Parse rule reference if provided
+-	if ruleId := params.URL.Get("filter_rule_id"); ruleId != "" {
+-		ruleIdInt, err := strconv.Atoi(ruleId)
+-		if err != nil {
+-			return database.DiagnosticListOptions{}, errors.New("invalid rule_id")
+-		}
+-		ref := goapi.RuleRef{
+-			RuleId: int32(ruleIdInt),
+-		}
+-		if ruleRevisionId := params.URL.Get("filter_revision_id"); ruleRevisionId != "" {
+-			ruleRevisionIdInt, err := strconv.Atoi(ruleRevisionId)
+-			if err != nil {
+-				return database.DiagnosticListOptions{}, errors.New("invalid rule_revision_id")
+-			}
+-			ref.RevisionId = int32(ruleRevisionIdInt)
+-		}
+-		opts.RuleRef = core.Some(ref)
+-	}
+-
+-	if agentId := params.URL.Get("filter_agent_id"); agentId != "" {
+-		agentIdInt, err := strconv.Atoi(agentId)
+-		if err != nil {
+-			return database.DiagnosticListOptions{}, errors.New("invalid agent_id")
+-		}
+-		opts.AgentId = core.Some(int32(agentIdInt))
+-	}
++var diagnosticOptsParser = queryparams.NewQueryParamParser[database.DiagnosticListOptions]()
++var ruleRefParser = queryparams.NewQueryParamParser[goapi.RuleRef]()
+ 
+-	if repoID := params.URL.Get("filter_repo_id"); repoID != "" {
+-		repoIDInt, err := strconv.Atoi(repoID)
+-		if err != nil {
+-			return database.DiagnosticListOptions{}, errors.New("invalid repo_id")
+-		}
+-		opts.RepoId = core.Some(int32(repoIDInt))
+-	}
++func parseDiagnosticListOpts(params *queryparams.QueryParams) (database.DiagnosticListOptions, error) {
+ 
+-	if changesetId := params.URL.Get("filter_changeset_id"); changesetId != "" {
+-		changesetIDInt, err := strconv.Atoi(changesetId)
+-		if err != nil {
+-			return database.DiagnosticListOptions{}, errors.New("invalid changeset_id")
+-		}
+-		opts.ChangesetId = core.Some(int32(changesetIDInt))
++	opts, err := diagnosticOptsParser.Parse(params)
++	if err != nil {
++		return database.DiagnosticListOptions{}, err
+ 	}
+ 
+-	if changesetAuthorExternalUsername := params.URL.Get("filter_changeset_author_external_username"); changesetAuthorExternalUsername != "" {
+-		opts.ChangesetAuthorExternalUsername = core.Some(changesetAuthorExternalUsername)
++	// Seperately parse the rule ref as the generic parser doesn't support optional structs
++	ruleRef, err := ruleRefParser.Parse(params)
++	if err != nil {
++		return database.DiagnosticListOptions{}, err
+ 	}
+-
+-	if severity := params.URL.Get("filter_severity"); severity != "" {
+-		switch severity {
+-		case "info", "warning", "error":
+-			opts.Severity = core.Some(severity)
+-		default:
+-			return database.DiagnosticListOptions{}, errors.Newf("invalid severity: %s (expected one of: info, warning, error)", severity)
+-		}
++	if ruleRef.RuleId > 0 {
++		opts.RuleRef = core.Some(ruleRef)
+ 	}
+ 
+ 	// Parse pagination parameters
+@@ -456,9 +394,15 @@ func parseDiagnosticListOpts(params *queryparams.QueryParams) (database.Diagnost
+ 	}
+ 	opts.Diagnostics = paginate.PaginationFromCursorAPI(diagnostics)
+ 
++	// Validate rule ID if present
++	if ref, ok := opts.RuleRef.Get(); ok {
++		if ref.RuleId <= 0 {
++			return database.DiagnosticListOptions{}, errors.New("invalid rule ID")
++		}
++	}
++
+ 	// Parse include feedback
+ 	if params.Includes("feedback") {
+-
+ 		// Parse feedback pagination
+ 		feedback, err := goapi.ParseCursorPaginationForID(params.URL, "feedback")
+ 		if err != nil {
+@@ -467,5 +411,7 @@ func parseDiagnosticListOpts(params *queryparams.QueryParams) (database.Diagnost
+ 		opts.Feedback = core.Some(paginate.PaginationFromCursorAPI(feedback))
+ 	}
+ 
++	opts.EnforceAuthz = true
++
+ 	return opts, nil
+ }
+diff --git a/cmd/frontend/internal/reviewapi/handler_review_test.go b/cmd/frontend/internal/reviewapi/handler_review_test.go
+index c429dc28393f..d9f4eb8fc3f5 100644
+--- a/cmd/frontend/internal/reviewapi/handler_review_test.go
++++ b/cmd/frontend/internal/reviewapi/handler_review_test.go
+@@ -7,6 +7,7 @@ import (
+ 	"fmt"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
+ 	"strconv"
+ 	"testing"
+ 
+@@ -64,6 +65,7 @@ func newReviewService(db *dbmocks.MockDB, reviewResult goapi.Review) review.Serv
+ 
+ func TestMain(m *testing.M) {
+ 	logtest.Init(m)
++	os.Exit(m.Run())
+ }
+ 
+ func TestReviewHandler(t *testing.T) {
+@@ -318,7 +320,7 @@ func TestHandleRetrieveReviews(t *testing.T) {
+ 		"include=diagnostics&"+
+ 		"page_first=2&"+
+ 		"page_after=50&"+
+-		"sort=-created_at&"+
++		"sort=-id&"+
+ 		"diagnostics.page_first=3&"+
+ 		"diagnostics.page_after=1000&"+
+ 		"diagnostics.sort=id", nil)
+@@ -342,7 +344,7 @@ func TestHandleRetrieveReviews(t *testing.T) {
+ 		Reviews: database.PaginationArgs{
+ 			First:   valast.Ptr(2),
+ 			After:   []any{50},
+-			OrderBy: database.OrderBy{database.OrderByOption{Field: "created_at"}},
++			OrderBy: database.OrderBy{database.OrderByOption{Field: "id", Ascending: false}},
+ 		},
+ 		Diagnostics: database.PaginationArgs{
+ 			First:   valast.Ptr(3),
+diff --git a/internal/database/changesets.go b/internal/database/changesets.go
+index b1f7b7a874f5..9e18cdf74855 100644
+--- a/internal/database/changesets.go
++++ b/internal/database/changesets.go
+@@ -26,7 +26,7 @@ type ChangesetStore interface {
+ }
+ 
+ type ChangesetListOptions struct {
+-	EnforceAuthz                bool
++	EnforceAuthz                bool `queryparams:"sensitive"`
+ 	Pagination                  core.Option[PaginationArgs]
+ 	ChangesetID                 *int32
+ 	ChangesetIDsWithRevisionIDs *map[int32]int32
+diff --git a/internal/database/conversations.go b/internal/database/conversations.go
+index 25720fe28beb..859e1c7d91a8 100644
+--- a/internal/database/conversations.go
++++ b/internal/database/conversations.go
+@@ -16,6 +16,7 @@ import (
+ 	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
+ 	"github.com/sourcegraph/sourcegraph/internal/openapi/goapi"
+ 	"github.com/sourcegraph/sourcegraph/internal/paginate"
++	"github.com/sourcegraph/sourcegraph/lib/core"
+ 	"github.com/sourcegraph/sourcegraph/lib/errors"
+ 	"github.com/sourcegraph/sourcegraph/lib/pointers"
+ )
+@@ -58,58 +59,53 @@ type conversationStore struct {
+ var _ ConversationStore = &conversationStore{}
+ 
+ type ConversationListOptions struct {
+-	EnforceAuthz      bool
+-	Kind              *string
+-	ConversationId    *int32
+-	AgentId           *int32
+-	InstallationId    *int64
+-	UserId            *int32
+-	DiagnosticId      *int32
+-	ReviewId          *int32
+-	ReviewIds         []int32
+-	IsDiagnostic      *bool
+-	ChangesetId       *int32
+-	PullRequestId     *int64
+-	ExternalApiUrl    *string
+-	ExternalHtmlUrl   *string
+-	ExternalServiceId *string
++	EnforceAuthz      bool `queryparams:"sensitive"`
++	Kind              core.Option[string]
++	ConversationId    core.Option[int32]
++	AgentId           core.Option[int32]
++	InstallationId    core.Option[int64]
++	UserId            core.Option[int32]
++	DiagnosticId      core.Option[int32]
++	ReviewId          core.Option[int32]
++	ReviewIds         core.Option[[]int32]
++	IsDiagnostic      core.Option[bool]
++	ChangesetId       core.Option[int32]
++	PullRequestId     core.Option[int64]
++	ExternalApiUrl    core.Option[string]
++	ExternalHtmlUrl   core.Option[string]
++	ExternalServiceId core.Option[string]
+ 	Conversations     PaginationArgs
+-	Messages          PaginationArgs
+-	Reactions         PaginationArgs
+-	IncludeMessages   bool
+-	IncludeReactions  bool
++	Messages          core.Option[PaginationArgs]
++	Reactions         core.Option[PaginationArgs]
+ }
+ 
+ type ConversationGetOptions struct {
+ 	ID                int32
+-	ExternalServiceId *string
+-	Messages          PaginationArgs
+-	Reactions         PaginationArgs
+-	IncludeMessages   bool
+-	IncludeReactions  bool
++	ExternalServiceId core.Option[string]
++	Messages          core.Option[PaginationArgs]
++	Reactions         core.Option[PaginationArgs]
+ }
+ 
+ type ConversationMessageListOptions struct {
+-	EnforceAuthz      bool
+-	UserId            *int32
+-	ConversationId    *int32
+-	MessageId         *int32
+-	ExternalApiUrl    *string
+-	ExternalHtmlUrl   *string
+-	ExternalServiceId *string
++	EnforceAuthz      bool `queryparams:"sensitive"`
++	UserId            core.Option[int32]
++	ConversationId    core.Option[int32]
++	MessageId         core.Option[int32]
++	ExternalApiUrl    core.Option[string]
++	ExternalHtmlUrl   core.Option[string]
++	ExternalServiceId core.Option[string]
+ 	Messages          PaginationArgs
+-	Reactions         PaginationArgs
+-	IncludeReactions  bool
++	Reactions         core.Option[PaginationArgs]
+ }
+ 
+ type ConversationMessageReactionListOptions struct {
+-	EnforceAuthz      bool
+-	UserId            *int32
+-	MessageId         *int32
+-	ReactionId        *int32
+-	ExternalApiUrl    *string
+-	ExternalHtmlUrl   *string
+-	ExternalServiceId *string
++	EnforceAuthz      bool `queryparams:"sensitive"`
++	UserId            core.Option[int32]
++	MessageId         core.Option[int32]
++	ReactionId        core.Option[int32]
++	ExternalApiUrl    core.Option[string]
++	ExternalHtmlUrl   core.Option[string]
++	ExternalServiceId core.Option[string]
+ 	Reactions         PaginationArgs
+ }
+ 
+@@ -348,7 +344,7 @@ func upsertReactions(ctx context.Context, tx *basestore.Store, reactions []*goap
+ 	)
+ }
+ 
+-func getMessagesForConversation(ctx context.Context, tx *basestore.Store, conversationId int32, messagePagination PaginationArgs, reactionPagination PaginationArgs, includeReactions bool) ([]goapi.ConversationMessage, error) {
++func getMessagesForConversation(ctx context.Context, tx *basestore.Store, conversationId int32, messagePagination PaginationArgs, reactionPagination core.Option[PaginationArgs]) ([]goapi.ConversationMessage, error) {
+ 	if messagePagination.LimitNumber() == nil {
+ 		messagePagination.First = pointers.Ptr(100)
+ 	}
+@@ -371,10 +367,10 @@ func getMessagesForConversation(ctx context.Context, tx *basestore.Store, conver
+ 	q = args.AppendOrderToQuery(q)
+ 	q = args.AppendLimitToQuery(q)
+ 
+-	if !includeReactions {
++	if reactionPagination.IsNone() {
+ 		return scanMessages(tx.Query(ctx, q))
+ 	}
+-	return getMessagesAndReactions(ctx, tx, q, reactionPagination)
++	return getMessagesAndReactions(ctx, tx, q, reactionPagination.Unwrap())
+ }
+ 
+ func getMessagesAndReactions(ctx context.Context, tx *basestore.Store, q *sqlf.Query, reactions PaginationArgs) ([]goapi.ConversationMessage, error) {
+@@ -477,51 +473,51 @@ func (c *conversationStore) List(ctx context.Context, opts ConversationListOptio
+ 	conds := []*sqlf.Query{}
+ 
+ 	// Build query conditions based on options
+-	if opts.Kind != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.kind = %s", *opts.Kind))
++	if value, ok := opts.Kind.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.kind = %s", value))
+ 	}
+-	if opts.ConversationId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.id = %s", *opts.ConversationId))
++	if value, ok := opts.ConversationId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.id = %s", value))
+ 	}
+-	if opts.AgentId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.agent_id = %s", *opts.AgentId))
++	if value, ok := opts.AgentId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.agent_id = %s", value))
+ 	}
+-	if opts.InstallationId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.installation_id = %s", *opts.InstallationId))
++	if value, ok := opts.InstallationId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.installation_id = %s", value))
+ 	}
+-	if opts.UserId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.user_id = %s", *opts.UserId))
++	if value, ok := opts.UserId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.user_id = %s", value))
+ 	}
+-	if opts.DiagnosticId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.diagnostic_id = %s", *opts.DiagnosticId))
++	if value, ok := opts.DiagnosticId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.diagnostic_id = %s", value))
+ 	}
+-	if opts.IsDiagnostic != nil {
+-		conds = append(conds, sqlf.Sprintf("diagnostic_id IS NOT NULL = %s", *opts.IsDiagnostic))
++	if value, ok := opts.IsDiagnostic.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("diagnostic_id IS NOT NULL = %s", value))
+ 	}
+-	if opts.ReviewId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.review_id = %s", *opts.ReviewId))
++	if value, ok := opts.ReviewId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.review_id = %s", value))
+ 	}
+-	if len(opts.ReviewIds) > 0 {
+-		reviewIdQueries := make([]*sqlf.Query, len(opts.ReviewIds))
+-		for i, id := range opts.ReviewIds {
++	if ids, ok := opts.ReviewIds.Get(); ok && len(ids) > 0 {
++		reviewIdQueries := make([]*sqlf.Query, len(ids))
++		for i, id := range ids {
+ 			reviewIdQueries[i] = sqlf.Sprintf("%d", id)
+ 		}
+ 		conds = append(conds, sqlf.Sprintf("agent_conversations.review_id IN (%s)", sqlf.Join(reviewIdQueries, ",")))
+ 	}
+-	if opts.ChangesetId != nil {
+-		conds = append(conds, sqlf.Sprintf("changeset_id = %s", *opts.ChangesetId))
++	if value, ok := opts.ChangesetId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("changeset_id = %s", value))
+ 	}
+-	if opts.PullRequestId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.pull_request_id = %s", *opts.PullRequestId))
++	if value, ok := opts.PullRequestId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.pull_request_id = %s", value))
+ 	}
+-	if opts.ExternalApiUrl != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.external_api_url = %s", *opts.ExternalApiUrl))
++	if value, ok := opts.ExternalApiUrl.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.external_api_url = %s", value))
+ 	}
+-	if opts.ExternalHtmlUrl != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.external_html_url = %s", *opts.ExternalHtmlUrl))
++	if value, ok := opts.ExternalHtmlUrl.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.external_html_url = %s", value))
+ 	}
+-	if opts.ExternalServiceId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversations.external_service_id = %s", *opts.ExternalServiceId))
++	if value, ok := opts.ExternalServiceId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversations.external_service_id = %s", value))
+ 	}
+ 
+ 	if opts.EnforceAuthz {
+@@ -545,8 +541,8 @@ func (c *conversationStore) List(ctx context.Context, opts ConversationListOptio
+ 			if err != nil {
+ 				return nil, errors.Wrap(err, "scanConversation")
+ 			}
+-			if opts.IncludeMessages {
+-				messages, err := getMessagesForConversation(ctx, tx, conv.Id, opts.Messages, opts.Reactions, opts.IncludeReactions)
++			if messages, ok := opts.Messages.Get(); ok {
++				messages, err := getMessagesForConversation(ctx, tx, conv.Id, messages, opts.Reactions)
+ 				if err != nil {
+ 					return nil, errors.Wrap(err, "getMessagesForConversation")
+ 				}
+@@ -566,24 +562,23 @@ func (c *conversationStore) ListMessages(ctx context.Context, opts ConversationM
+ 	conds := []*sqlf.Query{}
+ 
+ 	// Build query conditions based on options
+-
+-	if opts.UserId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.user_id = %s", *opts.UserId))
++	if value, ok := opts.UserId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.user_id = %s", value))
+ 	}
+-	if opts.ConversationId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.conversation_id = %s", *opts.ConversationId))
++	if value, ok := opts.ConversationId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.conversation_id = %s", value))
+ 	}
+-	if opts.MessageId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.id = %s", *opts.MessageId))
++	if value, ok := opts.MessageId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.id = %s", value))
+ 	}
+-	if opts.ExternalApiUrl != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.external_api_url = %s", *opts.ExternalApiUrl))
++	if value, ok := opts.ExternalApiUrl.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.external_api_url = %s", value))
+ 	}
+-	if opts.ExternalHtmlUrl != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.external_html_url = %s", *opts.ExternalHtmlUrl))
++	if value, ok := opts.ExternalHtmlUrl.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.external_html_url = %s", value))
+ 	}
+-	if opts.ExternalServiceId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.external_service_id = %s", *opts.ExternalServiceId))
++	if value, ok := opts.ExternalServiceId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_messages.external_service_id = %s", value))
+ 	}
+ 
+ 	if opts.EnforceAuthz {
+@@ -605,23 +600,24 @@ func (c *conversationStore) ListMessages(ctx context.Context, opts ConversationM
+ 		Pagination:    opts.Messages,
+ 		SelectColumns: []*sqlf.Query{sqlf.Sprintf("agent_conversation_messages.id"), sqlf.Sprintf("agent_conversation_messages.data"), sqlf.Sprintf("agent_conversation_messages.created_at")},
+ 		ScanRow: func(tx *basestore.Store, scanner dbutil.Scanner) (*goapi.ConversationMessage, error) {
+-			if !opts.IncludeReactions {
++			if reactions, ok := opts.Reactions.Get(); ok {
++				var message goapi.ConversationMessage
++				if err := scanMessageInto(scanner, &message, 0); err != nil {
++					return nil, err
++				}
++				reactions, err := getReactionsForMessage(ctx, tx, message.Id, reactions)
++				if err != nil {
++					return nil, errors.Wrap(err, "getReactionsForMessage")
++				}
++				message.Reactions = &reactions
++				return &message, nil
++			} else {
+ 				message, err := scanMessage(0)(scanner)
+ 				if err != nil {
+ 					return nil, errors.Wrap(err, "scanMessage")
+ 				}
+ 				return &message, nil
+ 			}
+-			var message goapi.ConversationMessage
+-			if err := scanMessageInto(scanner, &message, 0); err != nil {
+-				return nil, err
+-			}
+-			reactions, err := getReactionsForMessage(ctx, tx, message.Id, opts.Reactions)
+-			if err != nil {
+-				return nil, errors.Wrap(err, "getReactionsForMessage")
+-			}
+-			message.Reactions = &reactions
+-			return &message, nil
+ 		},
+ 	})
+ }
+@@ -743,23 +739,23 @@ func (c *conversationStore) ListReactions(ctx context.Context, opts Conversation
+ 	conds := []*sqlf.Query{}
+ 
+ 	// Build query conditions based on options
+-	if opts.UserId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.user_id = %s", *opts.UserId))
++	if userId, ok := opts.UserId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.user_id = %s", userId))
+ 	}
+-	if opts.MessageId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.message_id = %s", *opts.MessageId))
++	if messageId, ok := opts.MessageId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.message_id = %s", messageId))
+ 	}
+-	if opts.ReactionId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.id = %s", *opts.ReactionId))
++	if reactionId, ok := opts.ReactionId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.id = %s", reactionId))
+ 	}
+-	if opts.ExternalApiUrl != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.external_api_url = %s", *opts.ExternalApiUrl))
++	if apiUrl, ok := opts.ExternalApiUrl.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.external_api_url = %s", apiUrl))
+ 	}
+-	if opts.ExternalHtmlUrl != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.external_html_url = %s", *opts.ExternalHtmlUrl))
++	if htmlUrl, ok := opts.ExternalHtmlUrl.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.external_html_url = %s", htmlUrl))
+ 	}
+-	if opts.ExternalServiceId != nil {
+-		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.external_service_id = %s", *opts.ExternalServiceId))
++	if svcId, ok := opts.ExternalServiceId.Get(); ok {
++		conds = append(conds, sqlf.Sprintf("agent_conversation_message_reactions.external_service_id = %s", svcId))
+ 	}
+ 
+ 	if opts.EnforceAuthz {
+diff --git a/internal/database/dbtesting/test_conversations.go b/internal/database/dbtesting/test_conversations.go
+index d75c329aa301..66498a914041 100644
+--- a/internal/database/dbtesting/test_conversations.go
++++ b/internal/database/dbtesting/test_conversations.go
+@@ -2,7 +2,6 @@ package dbtesting
+ 
+ import (
+ 	"fmt"
+-	"sort"
+ 	"testing"
+ 	"time"
+ 
+@@ -12,6 +11,7 @@ import (
+ 	"github.com/sourcegraph/sourcegraph/internal/openapi/goapi"
+ 	"github.com/sourcegraph/sourcegraph/internal/tenant/tenanttest"
+ 	"github.com/sourcegraph/sourcegraph/internal/types"
++	"github.com/sourcegraph/sourcegraph/lib/core"
+ 	"github.com/sourcegraph/sourcegraph/lib/pointers"
+ )
+ 
+@@ -33,8 +33,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 		t.Run("GetByID", func(t *testing.T) {
+ 			retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-				ConversationId:  &conversation.Id,
+-				IncludeMessages: true,
++				ConversationId: core.Some(conversation.Id),
++				Messages:       core.Some(database.PaginationArgs{}),
+ 			})
+ 			require.NoError(t, err)
+ 			require.Equal(t, conversation.Id, retrieved.Id)
+@@ -43,8 +43,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 		t.Run("GetByIDNonExistent", func(t *testing.T) {
+ 			_, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-				ConversationId:  pointers.Ptr(int32(999999)),
+-				IncludeMessages: true,
++				ConversationId: core.Some(int32(999999)),
++				Messages:       core.Some(database.PaginationArgs{}),
+ 			})
+ 			require.Error(t, err)
+ 			require.IsType(t, database.ConversationNotFoundError{}, err)
+@@ -67,11 +67,10 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			// Test first page
+ 			retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-				ConversationId: &fixture.Id,
+-				Messages: database.PaginationArgs{
++				ConversationId: core.Some(fixture.Id),
++				Messages: core.Some(database.PaginationArgs{
+ 					First: pointers.Ptr(10),
+-				},
+-				IncludeMessages: true,
++				}),
+ 			})
+ 			require.NoError(t, err)
+ 			require.Len(t, *retrieved.Messages, 10)
+@@ -79,12 +78,11 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			// Test second page
+ 			retrieved, err = db.Conversations().Get(ctx, database.ConversationListOptions{
+-				ConversationId: &fixture.Id,
+-				Messages: database.PaginationArgs{
++				ConversationId: core.Some(fixture.Id),
++				Messages: core.Some(database.PaginationArgs{
+ 					First: pointers.Ptr(10),
+ 					After: []any{(*retrieved.Messages)[9].Id},
+-				},
+-				IncludeMessages: true,
++				}),
+ 			})
+ 			require.NoError(t, err)
+ 			require.Len(t, *retrieved.Messages, 10)
+@@ -96,11 +94,10 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			// Test negative First value
+ 			_, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-				ConversationId: &fixture.Id,
+-				Messages: database.PaginationArgs{
++				ConversationId: core.Some(fixture.Id),
++				Messages: core.Some(database.PaginationArgs{
+ 					First: pointers.Ptr(-1),
+-				},
+-				IncludeMessages: true,
++				}),
+ 			})
+ 			require.Error(t, err)
+ 		})
+@@ -109,8 +106,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			fixture := createConversationFixture(t, db, repo, withMessages(mkMessageFixture(withMsgText("First message")), mkMessageFixture(withMsgText("Second message"))))
+ 
+ 			retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-				ConversationId:  &fixture.Id,
+-				IncludeMessages: true,
++				ConversationId: core.Some(fixture.Id),
++				Messages:       core.Some(database.PaginationArgs{}),
+ 			})
+ 			require.NoError(t, err)
+ 			require.Len(t, *retrieved.Messages, 2)
+@@ -149,7 +146,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			// Verify reactions can be retrieved
+ 			retrieved, err := db.Conversations().ListReactions(ctx, database.ConversationMessageReactionListOptions{
+-				MessageId:    &message.Id,
++				MessageId:    core.Some(message.Id),
+ 				EnforceAuthz: true,
+ 			})
+ 			require.NoError(t, err)
+@@ -169,8 +166,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				// Verify the update persisted
+ 				retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-					ConversationId:  &conversation.Id,
+-					IncludeMessages: true,
++					ConversationId: core.Some(conversation.Id),
++					Messages:       core.Some(database.PaginationArgs{}),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, "completed", *retrieved.Status)
+@@ -195,8 +192,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				// Verify the update persisted
+ 				retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-					ConversationId:  &initial.Id,
+-					IncludeMessages: true,
++					ConversationId: core.Some(initial.Id),
++					Messages:       core.Some(database.PaginationArgs{}),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, "completed", *retrieved.Status)
+@@ -335,7 +332,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 				// Verify the message was updated in the database
+ 				retrieved, err := db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+ 					EnforceAuthz: true,
+-					MessageId:    &created1.Id,
++					MessageId:    core.Some(created1.Id),
+ 				})
+ 				require.NoError(t, err)
+ 				t.Logf("retrieved: %+v", retrieved)
+@@ -350,7 +347,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 				conversation := createConversationFixture(t, db, repo)
+ 				message := (*conversation.Messages)[0]
+ 				retrieved, err := db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+-					MessageId: &message.Id,
++					MessageId: core.Some(message.Id),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, message.Id, retrieved.Id)
+@@ -358,7 +355,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				// Test non-existent message
+ 				_, err = db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+-					MessageId: pointers.Ptr(int32(999999)),
++					MessageId: core.Some(int32(999999)),
+ 				})
+ 				require.Error(t, err)
+ 				require.IsType(t, database.MessageNotFoundError{}, err)
+@@ -394,7 +391,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			t.Run("Filter by kind", func(t *testing.T) {
+ 				kind := "code_review"
+ 				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					Kind: &kind,
++					Kind: core.Some(kind),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, conversations.Nodes, 2)
+@@ -405,7 +402,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Filter by user Id", func(t *testing.T) {
+ 				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					UserId: &user.ID,
++					UserId: core.Some(user.ID),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, conversations.Nodes, 1)
+@@ -413,8 +410,9 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			})
+ 
+ 			t.Run("Filter by external API URL", func(t *testing.T) {
++				apiURL := "fake-url"
+ 				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					ExternalApiUrl: pointers.Ptr("fake-url"),
++					ExternalApiUrl: core.Some(apiURL),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, conversations.Nodes, 1)
+@@ -425,7 +423,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 				conv1 := createConversationFixture(t, db, repo)
+ 				conv2 := createConversationFixture(t, db, repo)
+ 				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					ReviewIds: []int32{*conv1.ReviewId, *conv2.ReviewId},
++					ReviewIds: core.Some([]int32{*conv1.ReviewId, *conv2.ReviewId}),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, conversations.Nodes, 2)
+@@ -446,7 +444,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				conv := createConversationFixture(t, db, repo, withChangesetId(changeset.Id))
+ 				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					ChangesetId: conv.ChangesetId,
++					ChangesetId: core.Some(*conv.ChangesetId),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, conversations.Nodes, 1)
+@@ -463,53 +461,6 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 				require.Len(t, conversations.Nodes, 2)
+ 			})
+ 
+-			t.Run("does not include messages if include_messages is false", func(t *testing.T) {
+-				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					IncludeMessages: false,
+-				})
+-				require.NoError(t, err)
+-				for _, conv := range conversations.Nodes {
+-					require.Nil(t, conv.Messages)
+-				}
+-			})
+-
+-			t.Run("message inclusion and pagination", func(t *testing.T) {
+-				// Create conversation with many messages
+-				messages := make([]goapi.ConversationMessage, 15)
+-				for i := range 15 {
+-					messages[i] = goapi.ConversationMessage{
+-						Role: pointers.Ptr("user"),
+-						Content: goapi.ConversationMessageContent{
+-							Type: "text",
+-							Text: pointers.Ptr(fmt.Sprintf("List Message %d", i)),
+-						},
+-					}
+-				}
+-				fixture := createConversationFixture(t, db, repo, withMessages(messages...))
+-
+-				// Test List with message pagination
+-				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					ReviewId:        fixture.ReviewId,
+-					IncludeMessages: true,
+-					Messages: database.PaginationArgs{
+-						First: pointers.Ptr(5),
+-					},
+-				})
+-				require.NoError(t, err)
+-				require.Len(t, conversations.Nodes, 1)
+-				require.NotNil(t, conversations.Nodes[0].Messages)
+-				require.Len(t, *conversations.Nodes[0].Messages, 5)
+-				require.Equal(t, "List Message 0", *(*conversations.Nodes[0].Messages)[0].Content.Text)
+-			})
+-
+-			t.Run("Verify ascending order", func(t *testing.T) {
+-				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{})
+-				require.NoError(t, err)
+-				require.True(t, sort.SliceIsSorted(conversations.Nodes, func(i, j int) bool {
+-					return conversations.Nodes[i].Id < conversations.Nodes[j].Id
+-				}))
+-			})
+-
+ 			t.Run("Pagination with cursor page", func(t *testing.T) {
+ 				// Get all conversations first
+ 				allConvs, _ := db.Conversations().List(ctx, database.ConversationListOptions{})
+@@ -531,8 +482,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			t.Run("Combined filters", func(t *testing.T) {
+ 				kind := "code_review"
+ 				conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-					Kind:   &kind,
+-					UserId: &user.ID,
++					Kind:   core.Some(kind),
++					UserId: core.Some(user.ID),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, conversations.Nodes, 1)
+@@ -579,14 +530,14 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				t.Run("Filter by AgentId", func(t *testing.T) {
+ 					_, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-						AgentId: pointers.Ptr(agent.Id),
++						AgentId: core.Some(agent.Id),
+ 					})
+ 					require.NoError(t, err)
+ 				})
+ 
+ 				t.Run("Filter by DiagnosticId", func(t *testing.T) {
+ 					conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-						DiagnosticId: conv.DiagnosticId,
++						DiagnosticId: core.Some(*conv.DiagnosticId),
+ 					})
+ 					require.NoError(t, err)
+ 					require.Len(t, conversations.Nodes, 1)
+@@ -607,7 +558,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 						val:   false,
+ 					}} {
+ 						conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-							IsDiagnostic: pointers.Ptr(tt.val),
++							IsDiagnostic: core.Some(tt.val),
+ 							Conversations: database.PaginationArgs{
+ 								First: pointers.Ptr(10),
+ 							},
+@@ -626,7 +577,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				t.Run("Filter by ReviewId", func(t *testing.T) {
+ 					conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-						ReviewId: conv.ReviewId,
++						ReviewId: core.Some(*conv.ReviewId),
+ 					})
+ 					require.NoError(t, err)
+ 					require.Len(t, conversations.Nodes, 1)
+@@ -656,18 +607,16 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 				t.Run("List with reaction pagination", func(t *testing.T) {
+ 					// Test first page of reactions
+ 					conversations, err := db.Conversations().List(ctx, database.ConversationListOptions{
+-						ExternalApiUrl: &url,
++						ExternalApiUrl: core.Some(url),
+ 						Conversations: database.PaginationArgs{
+ 							First: pointers.Ptr(1),
+ 						},
+-						IncludeMessages: true,
+-						Messages: database.PaginationArgs{
++						Messages: core.Some(database.PaginationArgs{
+ 							First: pointers.Ptr(10),
+-						},
+-						IncludeReactions: true,
+-						Reactions: database.PaginationArgs{
++						}),
++						Reactions: core.Some(database.PaginationArgs{
+ 							First: pointers.Ptr(2),
+-						},
++						}),
+ 					})
+ 					require.NoError(t, err)
+ 					require.Len(t, conversations.Nodes, 1)
+@@ -686,16 +635,14 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 					// Test second page of reactions for first message
+ 					firstReaction := (*messages[0].Reactions)[1]
+ 					conversations, err = db.Conversations().List(ctx, database.ConversationListOptions{
+-						ExternalApiUrl:   &url,
+-						IncludeMessages:  true,
+-						IncludeReactions: true,
+-						Messages: database.PaginationArgs{
++						ExternalApiUrl: core.Some(url),
++						Messages: core.Some(database.PaginationArgs{
+ 							First: pointers.Ptr(10),
+-						},
+-						Reactions: database.PaginationArgs{
++						}),
++						Reactions: core.Some(database.PaginationArgs{
+ 							First: pointers.Ptr(2),
+ 							After: []any{firstReaction.Id},
+-						},
++						}),
+ 					})
+ 					require.NoError(t, err)
+ 					require.Len(t, conversations.Nodes, 1)
+@@ -726,11 +673,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				t.Run("List all messages with paginated reactions", func(t *testing.T) {
+ 					listed, err := db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-						ConversationId:   &conv.Id,
+-						IncludeReactions: true,
+-						Reactions: database.PaginationArgs{
+-							First: pointers.Ptr(2),
+-						},
++						ConversationId: core.Some(conv.Id),
++						Reactions:      core.Some(database.PaginationArgs{First: pointers.Ptr(2)}),
+ 					})
+ 					require.NoError(t, err)
+ 					require.Len(t, listed.Nodes, 2)
+@@ -746,11 +690,8 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				t.Run("List messages with reaction pagination after", func(t *testing.T) {
+ 					firstListed, err := db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-						ConversationId:   &conv.Id,
+-						IncludeReactions: true,
+-						Reactions: database.PaginationArgs{
+-							First: pointers.Ptr(2),
+-						},
++						ConversationId: core.Some(conv.Id),
++						Reactions:      core.Some(database.PaginationArgs{First: pointers.Ptr(2)}),
+ 					})
+ 					require.NoError(t, err)
+ 					require.NotEmpty(t, firstListed)
+@@ -758,12 +699,11 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 					firstReaction := (*firstListed.Nodes[0].Reactions)[1]
+ 					listed, err := db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-						ConversationId:   &conv.Id,
+-						IncludeReactions: true,
+-						Reactions: database.PaginationArgs{
++						ConversationId: core.Some(conv.Id),
++						Reactions: core.Some(database.PaginationArgs{
+ 							First: pointers.Ptr(2),
+ 							After: []any{firstReaction.Id},
+-						},
++						}),
+ 					})
+ 					require.NoError(t, err)
+ 					require.Len(t, listed.Nodes, 2)
+@@ -784,7 +724,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Get single conversation", func(t *testing.T) {
+ 				retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-					ReviewId: conv1.ReviewId,
++					ReviewId: core.MaybePtr(conv1.ReviewId),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, conv1.Id, retrieved.Id)
+@@ -792,7 +732,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Get returns error when no conversations match", func(t *testing.T) {
+ 				_, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-					ReviewId: pointers.Ptr(int32(999999)),
++					ReviewId: core.Some(int32(999999)),
+ 				})
+ 				require.Error(t, err)
+ 				require.IsType(t, database.ConversationNotFoundError{}, err)
+@@ -811,15 +751,13 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				// Test pagination of both messages and reactions
+ 				retrieved, err := db.Conversations().Get(ctx, database.ConversationListOptions{
+-					ReviewId:        conv.ReviewId,
+-					IncludeMessages: true,
+-					Messages: database.PaginationArgs{
++					ReviewId: core.MaybePtr(conv.ReviewId),
++					Messages: core.Some(database.PaginationArgs{
+ 						First: pointers.Ptr(1),
+-					},
+-					IncludeReactions: true,
+-					Reactions: database.PaginationArgs{
++					}),
++					Reactions: core.Some(database.PaginationArgs{
+ 						First: pointers.Ptr(2),
+-					},
++					}),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, conv.Id, retrieved.Id)
+@@ -833,16 +771,14 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 				// Get next page of reactions using After
+ 				firstReaction := (*firstMessage.Reactions)[1]
+ 				retrieved, err = db.Conversations().Get(ctx, database.ConversationListOptions{
+-					ReviewId:         conv.ReviewId,
+-					IncludeMessages:  true,
+-					IncludeReactions: true,
+-					Messages: database.PaginationArgs{
++					ReviewId: core.MaybePtr(conv.ReviewId),
++					Messages: core.Some(database.PaginationArgs{
+ 						First: pointers.Ptr(1),
+-					},
+-					Reactions: database.PaginationArgs{
++					}),
++					Reactions: core.Some(database.PaginationArgs{
+ 						First: pointers.Ptr(2),
+ 						After: []any{firstReaction.Id},
+-					},
++					}),
+ 				})
+ 				require.NoError(t, err)
+ 				require.NotNil(t, retrieved.Messages)
+@@ -868,7 +804,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("List all messages", func(t *testing.T) {
+ 				msgs, err := db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-					ConversationId: &conv.Id,
++					ConversationId: core.Some(conv.Id),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, msgs.Nodes, 2)
+@@ -877,7 +813,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			t.Run("Filter by external API URL", func(t *testing.T) {
+ 				url := "https://api.example.com/message/1"
+ 				msgs, err := db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-					ExternalApiUrl: &url,
++					ExternalApiUrl: core.Some(url),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Len(t, msgs.Nodes, 1)
+@@ -886,7 +822,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Pagination", func(t *testing.T) {
+ 				msgs, err := db.Conversations().ListMessages(ctx, database.ConversationMessageListOptions{
+-					ConversationId: &conv.Id,
++					ConversationId: core.Some(conv.Id),
+ 					Messages: database.PaginationArgs{
+ 						First: pointers.Ptr(1),
+ 					},
+@@ -913,7 +849,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Get single message", func(t *testing.T) {
+ 				msg, err := db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+-					ConversationId: &conv.Id,
++					ConversationId: core.Some(conv.Id),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, txt, *msg.Content.Text)
+@@ -921,7 +857,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Get returns error when no messages match", func(t *testing.T) {
+ 				_, err := db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+-					ConversationId: pointers.Ptr(int32(999999)),
++					ConversationId: core.Some(int32(999999)),
+ 				})
+ 				require.Error(t, err)
+ 				require.IsType(t, database.MessageNotFoundError{}, err)
+@@ -929,7 +865,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("Get by external API URL", func(t *testing.T) {
+ 				msg, err := db.Conversations().GetMessage(ctx, database.ConversationMessageListOptions{
+-					ExternalApiUrl: &url,
++					ExternalApiUrl: core.Some(url),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, url, *msg.ExternalApiUrl)
+@@ -1061,7 +997,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			t.Run("GetReactionById", func(t *testing.T) {
+ 				reaction := createReactionFixture(t, db, withReactionMessage(message))
+ 				retrieved, err := db.Conversations().GetReaction(ctx, database.ConversationMessageReactionListOptions{
+-					ReactionId: &reaction.Id,
++					ReactionId: core.Some(reaction.Id),
+ 				})
+ 				require.NoError(t, err)
+ 				require.Equal(t, reaction.Id, retrieved.Id)
+@@ -1071,7 +1007,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 			t.Run("GetReactionByIdNonExistent", func(t *testing.T) {
+ 				_, err := db.Conversations().GetReaction(ctx, database.ConversationMessageReactionListOptions{
+-					ReactionId: pointers.Ptr(int32(8675309)),
++					ReactionId: core.Some(int32(8675309)),
+ 				})
+ 				require.Error(t, err)
+ 				require.IsType(t, database.ReactionNotFoundError{}, err)
+@@ -1091,7 +1027,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				// Test listing all reactions
+ 				listed, err := db.Conversations().ListReactions(ctx, database.ConversationMessageReactionListOptions{
+-					MessageId:    &message.Id,
++					MessageId:    core.Some(message.Id),
+ 					EnforceAuthz: true,
+ 				})
+ 				require.NoError(t, err)
+@@ -1099,7 +1035,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 
+ 				// Test pagination
+ 				firstPage, err := db.Conversations().ListReactions(ctx, database.ConversationMessageReactionListOptions{
+-					MessageId: &message.Id,
++					MessageId: core.Some(message.Id),
+ 					Reactions: database.PaginationArgs{
+ 						First: pointers.Ptr(2),
+ 					},
+@@ -1112,7 +1048,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			t.Run("GetReaction", func(t *testing.T) {
+ 				createReactionFixture(t, db, withReactionMessage(message))
+ 				retrieved, err := db.Conversations().GetReaction(ctx, database.ConversationMessageReactionListOptions{
+-					MessageId: &message.Id,
++					MessageId: core.Some(message.Id),
+ 				})
+ 				require.NoError(t, err)
+ 				require.NotZero(t, retrieved.Id)
+@@ -1121,7 +1057,7 @@ func RunTestConversations(t *testing.T, info TestDBInfo) {
+ 			t.Run("GetReactionNonExistent", func(t *testing.T) {
+ 				nonExistentMessageId := int32(8675309)
+ 				_, err := db.Conversations().GetReaction(ctx, database.ConversationMessageReactionListOptions{
+-					MessageId: &nonExistentMessageId,
++					MessageId: core.Some(nonExistentMessageId),
+ 				})
+ 				require.Error(t, err)
+ 				require.IsType(t, database.ReactionNotFoundError{}, err)
+diff --git a/internal/database/fakedb/conversations.go b/internal/database/fakedb/conversations.go
+index 15e13458063e..d436031882c5 100644
+--- a/internal/database/fakedb/conversations.go
++++ b/internal/database/fakedb/conversations.go
+@@ -195,7 +195,6 @@ func (s *Conversations) update(request goapi.Conversation) (goapi.Conversation,
+ }
+ 
+ func (s *Conversations) List(ctx context.Context, opts database.ConversationListOptions) (*paginate.Page[goapi.Conversation], error) {
+-
+ 	if opts.Conversations.Last != nil {
+ 		return nil, errors.New("backwards pagination is not supported for conversations")
+ 	}
+@@ -221,27 +220,27 @@ func (s *Conversations) List(ctx context.Context, opts database.ConversationList
+ 	}
+ 
+ 	// Include messages if requested
+-	if opts.IncludeMessages {
++	if messages, ok := opts.Messages.Get(); ok {
+ 		for i := range page.Nodes {
+-			messages, err := paginateResults(s.messages[page.Nodes[i].Id], opts.Messages)
++			messages, err := paginateResults(s.messages[page.Nodes[i].Id], messages)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+ 			page.Nodes[i].Messages = &messages.Nodes
+ 		}
+-	}
+ 
+-	// Include reactions if requested
+-	if opts.IncludeReactions {
+-		for i := range page.Nodes {
+-			for j := range *page.Nodes[i].Messages {
+-				msgId := (*page.Nodes[i].Messages)[j].Id
+-				reactions, err := paginateResults(s.reactions[msgId], opts.Reactions)
+-				if err != nil {
+-					return nil, err
+-				}
+-				if len(reactions.Nodes) > 0 {
+-					(*page.Nodes[i].Messages)[j].Reactions = &reactions.Nodes
++		// Include reactions if requested
++		if reactions, ok := opts.Reactions.Get(); ok {
++			for i := range page.Nodes {
++				for j := range *page.Nodes[i].Messages {
++					msgId := (*page.Nodes[i].Messages)[j].Id
++					reactions, err := paginateResults(s.reactions[msgId], reactions)
++					if err != nil {
++						return nil, err
++					}
++					if len(reactions.Nodes) > 0 {
++						(*page.Nodes[i].Messages)[j].Reactions = &reactions.Nodes
++					}
+ 				}
+ 			}
+ 		}
+@@ -280,9 +279,9 @@ func (s *Conversations) ListMessages(ctx context.Context, opts database.Conversa
+ 	}
+ 
+ 	// Include reactions if requested
+-	if opts.IncludeReactions {
++	if reactions, ok := opts.Reactions.Get(); ok {
+ 		for i := range messages.Nodes {
+-			reactions, err := paginateResults(s.reactions[messages.Nodes[i].Id], opts.Reactions)
++			reactions, err := paginateResults(s.reactions[messages.Nodes[i].Id], reactions)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -395,22 +394,22 @@ func (s *Conversations) GetReaction(ctx context.Context, opts database.Conversat
+ }
+ 
+ func matchesReactionFilters(reaction goapi.ConversationMessageReaction, opts database.ConversationMessageReactionListOptions) bool {
+-	if opts.UserId != nil && reaction.UserId != opts.UserId {
++	if value, ok := opts.UserId.Get(); ok && (reaction.UserId == nil || *reaction.UserId != value) {
+ 		return false
+ 	}
+-	if opts.MessageId != nil && reaction.MessageId != *opts.MessageId {
++	if value, ok := opts.MessageId.Get(); ok && reaction.MessageId != value {
+ 		return false
+ 	}
+-	if opts.ReactionId != nil && reaction.Id != *opts.ReactionId {
++	if value, ok := opts.ReactionId.Get(); ok && reaction.Id != value {
+ 		return false
+ 	}
+-	if opts.ExternalApiUrl != nil && (reaction.ExternalApiUrl == nil || *reaction.ExternalApiUrl != *opts.ExternalApiUrl) {
++	if value, ok := opts.ExternalApiUrl.Get(); ok && (reaction.ExternalApiUrl == nil || *reaction.ExternalApiUrl != value) {
+ 		return false
+ 	}
+-	if opts.ExternalHtmlUrl != nil && (reaction.ExternalHtmlUrl == nil || *reaction.ExternalHtmlUrl != *opts.ExternalHtmlUrl) {
++	if value, ok := opts.ExternalHtmlUrl.Get(); ok && (reaction.ExternalHtmlUrl == nil || *reaction.ExternalHtmlUrl != value) {
+ 		return false
+ 	}
+-	if opts.ExternalServiceId != nil && (reaction.ExternalServiceId == nil || *reaction.ExternalServiceId != *opts.ExternalServiceId) {
++	if value, ok := opts.ExternalServiceId.Get(); ok && (reaction.ExternalServiceId == nil || *reaction.ExternalServiceId != value) {
+ 		return false
+ 	}
+ 	return true
+@@ -491,22 +490,22 @@ func fromSliceOfPtrs(ptrs []*goapi.ConversationMessage) []goapi.ConversationMess
+ }
+ 
+ func matchesMessageFilters(msg goapi.ConversationMessage, opts database.ConversationMessageListOptions) bool {
+-	if opts.ConversationId != nil && *opts.ConversationId != msg.ConversationId {
++	if value, ok := opts.ConversationId.Get(); ok && value != msg.ConversationId {
+ 		return false
+ 	}
+-	if opts.MessageId != nil && *opts.MessageId != msg.Id {
++	if value, ok := opts.MessageId.Get(); ok && value != msg.Id {
+ 		return false
+ 	}
+-	if opts.UserId != nil && (msg.UserId == nil || *msg.UserId != *opts.UserId) {
++	if value, ok := opts.UserId.Get(); ok && (msg.UserId == nil || *msg.UserId != value) {
+ 		return false
+ 	}
+-	if opts.ExternalApiUrl != nil && (msg.ExternalApiUrl == nil || *msg.ExternalApiUrl != *opts.ExternalApiUrl) {
++	if value, ok := opts.ExternalApiUrl.Get(); ok && (msg.ExternalApiUrl == nil || *msg.ExternalApiUrl != value) {
+ 		return false
+ 	}
+-	if opts.ExternalHtmlUrl != nil && (msg.ExternalHtmlUrl == nil || *msg.ExternalHtmlUrl != *opts.ExternalHtmlUrl) {
++	if value, ok := opts.ExternalHtmlUrl.Get(); ok && (msg.ExternalHtmlUrl == nil || *msg.ExternalHtmlUrl != value) {
+ 		return false
+ 	}
+-	if opts.ExternalServiceId != nil && (msg.ExternalServiceId == nil || *msg.ExternalServiceId != *opts.ExternalServiceId) {
++	if value, ok := opts.ExternalServiceId.Get(); ok && (msg.ExternalServiceId == nil || *msg.ExternalServiceId != value) {
+ 		return false
+ 	}
+ 	return true
+@@ -524,40 +523,40 @@ func (s *Conversations) UnsafeTruncateForTesting(ctx context.Context) error {
+ }
+ 
+ func matchesFilters(conv goapi.Conversation, opts database.ConversationListOptions) bool {
+-	if opts.Kind != nil && conv.Kind != *opts.Kind {
++	if value, ok := opts.Kind.Get(); ok && conv.Kind != value {
+ 		return false
+ 	}
+-	if opts.AgentId != nil && (conv.AgentId == nil || *conv.AgentId != *opts.AgentId) {
++	if value, ok := opts.AgentId.Get(); ok && (conv.AgentId == nil || *conv.AgentId != value) {
+ 		return false
+ 	}
+-	if opts.ConversationId != nil && *opts.ConversationId != conv.Id {
++	if value, ok := opts.ConversationId.Get(); ok && value != conv.Id {
+ 		return false
+ 	}
+-	if opts.UserId != nil && (conv.UserId == nil || *conv.UserId != *opts.UserId) {
++	if value, ok := opts.UserId.Get(); ok && (conv.UserId == nil || *conv.UserId != value) {
+ 		return false
+ 	}
+-	if opts.IsDiagnostic != nil && (conv.DiagnosticId != nil) != *opts.IsDiagnostic {
++	if value, ok := opts.IsDiagnostic.Get(); ok && (conv.DiagnosticId != nil) != value {
+ 		return false
+ 	}
+-	if opts.DiagnosticId != nil && (conv.DiagnosticId == nil || *conv.DiagnosticId != *opts.DiagnosticId) {
++	if value, ok := opts.DiagnosticId.Get(); ok && (conv.DiagnosticId == nil || *conv.DiagnosticId != value) {
+ 		return false
+ 	}
+-	if opts.ReviewId != nil && (conv.ReviewId == nil || *conv.ReviewId != *opts.ReviewId) {
++	if value, ok := opts.ReviewId.Get(); ok && (conv.ReviewId == nil || *conv.ReviewId != value) {
+ 		return false
+ 	}
+-	if opts.ChangesetId != nil && (conv.ChangesetId == nil || *conv.ChangesetId != *opts.ChangesetId) {
++	if value, ok := opts.ChangesetId.Get(); ok && (conv.ChangesetId == nil || *conv.ChangesetId != value) {
+ 		return false
+ 	}
+-	if opts.PullRequestId != nil && (conv.PullRequestId == nil || *conv.PullRequestId != *opts.PullRequestId) {
++	if value, ok := opts.PullRequestId.Get(); ok && (conv.PullRequestId == nil || *conv.PullRequestId != value) {
+ 		return false
+ 	}
+-	if opts.ExternalApiUrl != nil && (conv.ExternalApiUrl == nil || *conv.ExternalApiUrl != *opts.ExternalApiUrl) {
++	if value, ok := opts.ExternalApiUrl.Get(); ok && (conv.ExternalApiUrl == nil || *conv.ExternalApiUrl != value) {
+ 		return false
+ 	}
+-	if opts.ExternalHtmlUrl != nil && (conv.ExternalHtmlUrl == nil || *conv.ExternalHtmlUrl != *opts.ExternalHtmlUrl) {
++	if value, ok := opts.ExternalHtmlUrl.Get(); ok && (conv.ExternalHtmlUrl == nil || *conv.ExternalHtmlUrl != value) {
+ 		return false
+ 	}
+-	if len(opts.ReviewIds) > 0 && !slices.Contains(opts.ReviewIds, *conv.ReviewId) {
++	if reviewIds, ok := opts.ReviewIds.Get(); ok && len(reviewIds) > 0 && !slices.Contains(reviewIds, *conv.ReviewId) {
+ 		return false
+ 	}
+ 	return true
+diff --git a/internal/database/fakedb/reviews.go b/internal/database/fakedb/reviews.go
+index 8665f1cfe4da..b41dafc25c8d 100644
+--- a/internal/database/fakedb/reviews.go
++++ b/internal/database/fakedb/reviews.go
+@@ -320,7 +320,11 @@ func (s *Reviews) ListDiagnostics(ctx context.Context, opts database.DiagnosticL
+ 	var diagnostics []goapi.ReviewDiagnostic
+ 	for _, d := range s.diagnostics {
+ 		if ref, ok := opts.RuleRef.Get(); ok {
+-			if d.Rule == nil || d.Rule.RuleId != ref.RuleId || (ref.RevisionId != 0 && d.Rule.RevisionId != ref.RevisionId) {
++			if d.Rule == nil || d.Rule.RuleId != ref.RuleId {
++				continue
++			}
++			// Only check revision ID if it's non-zero
++			if ref.RevisionId != 0 && d.Rule.RevisionId != ref.RevisionId {
+ 				continue
+ 			}
+ 		}
+diff --git a/internal/database/reviews.go b/internal/database/reviews.go
+index ae51eaa838e4..32a32d63b94e 100644
+--- a/internal/database/reviews.go
++++ b/internal/database/reviews.go
+@@ -44,7 +44,7 @@ type ReviewStore interface {
+ }
+ 
+ type ReviewListOptions struct {
+-	EnforceAuthz       bool
++	EnforceAuthz       bool `queryparams:"sensitive"`
+ 	ReviewIds          core.Option[[]int32]
+ 	AgentId            core.Option[int32]
+ 	PullRequestApiUrl  core.Option[string]
+@@ -60,7 +60,7 @@ type ReviewGetOptions struct {
+ }
+ 
+ type DiagnosticListOptions struct {
+-	EnforceAuthz                    bool
++	EnforceAuthz                    bool `queryparams:"sensitive"`
+ 	RuleRef                         core.Option[goapi.RuleRef]
+ 	ChangesetId                     core.Option[int32]
+ 	ChangesetAuthorExternalUsername core.Option[string]
+diff --git a/internal/openapi/internal.tsp b/internal/openapi/internal.tsp
+index 59512d6e4ca5..4d7f995fa62a 100644
+--- a/internal/openapi/internal.tsp
++++ b/internal/openapi/internal.tsp
+@@ -915,13 +915,15 @@ interface ReviewService {
+     @get
+     @route("/.api/reviews")
+     retrieveReviews(
++        @query("include") include?: ("diagnostics" | "changesets" | "file_diffs")[] | null,
++
+         @query("filter_pull_request_api_url")
+         pull_request_api_url?: string | null,
+ 
+-        @query("include") include?: ("diagnostics" | "changesets" | "file_diffs")[] | null,
+         @query("filter_changeset_author_external_username") changeset_author_external_username?: string | null,
+         @query("filter_repo_id") repo_id?: int32 | null,
+         @query("filter_rule_id") rule_id?: int32 | null,
++        @query("filter_revision_id") revision_id?: int32 | null,
+         @query("filter_changeset_id") changeset_id?: int32 | null,
+         @query("filter_severity") severity?: Severity | null,
+         @query("filter_review_id") review_id?: int32 | null,
+@@ -1001,13 +1003,20 @@ interface ConversationService {
+         @query("filter_diagnostic_id") diagnostic_id?: int32 | null,
+         @query("filter_review_id") review_id?: int32 | null,
+         @query("filter_pull_request_id") pull_request_id?: int32 | null,
+-        @query("include") include?: "messages" | null,
++        @query("filter_changeset_id") changeset_id?: int32 | null,
++        @query("filter_external_service_id") external_service_id?: string | null,
++        @query("filter_external_api_url") external_api_url?: string | null,
++        @query("filter_external_html_url") external_html_url?: string | null,
++        @query("include") include?: ("messages" | "reactions")[] | null,
+         @query("page_first") page_size?: uint32,
+         @query("page_after") page_after?: uint32,
+         @query("sort") sort?: "created_at" | "-created_at" | "id" | "-id" | null,
+         @query("messages.page_first") messages_page_size?: uint32,
+         @query("messages.page_after") messages_page_after?: uint32,
+         @query("messages.sort") messages_sort?: "created_at" | "-created_at" | "id" | "-id" | null,
++        @query("reactions.page_first") reactions_page_size?: uint32,
++        @query("reactions.page_after") reactions_page_after?: uint32,
++        @query("reactions.sort") reactions_sort?: "created_at" | "-created_at" | "id" | "-id" | null,
+     ): ConversationPage;
+ 
+     @post
+diff --git a/internal/queryparams/BUILD.bazel b/internal/queryparams/BUILD.bazel
+index 7630031a87f3..f7b16d7b59a7 100644
+--- a/internal/queryparams/BUILD.bazel
++++ b/internal/queryparams/BUILD.bazel
+@@ -1,8 +1,28 @@
+ load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("//dev:go_defs.bzl", "go_test")
+ 
+ go_library(
+     name = "queryparams",
+-    srcs = ["parse.go"],
++    srcs = [
++        "parse.go",
++        "query_param_parser.go",
++    ],
+     importpath = "github.com/sourcegraph/sourcegraph/internal/queryparams",
+     visibility = ["//:__subpackages__"],
++    deps = [
++        "//lib/core",
++        "//lib/errors",
++        "@com_github_iancoleman_strcase//:strcase",
++    ],
++)
++
++go_test(
++    name = "queryparams_test",
++    srcs = ["query_param_parser_test.go"],
++    embed = [":queryparams"],
++    deps = [
++        "//lib/core",
++        "//lib/pointers",
++        "@com_github_stretchr_testify//assert",
++    ],
+ )
+diff --git a/internal/queryparams/query_param_parser.go b/internal/queryparams/query_param_parser.go
+new file mode 100644
+index 000000000000..1ac950409df6
+--- /dev/null
++++ b/internal/queryparams/query_param_parser.go
+@@ -0,0 +1,301 @@
++package queryparams
++
++import (
++	"reflect"
++	"strconv"
++	"strings"
++
++	"github.com/iancoleman/strcase"
++
++	"github.com/sourcegraph/sourcegraph/lib/core"
++	"github.com/sourcegraph/sourcegraph/lib/errors"
++)
++
++// fieldInfo stores precomputed reflection information about a struct field
++type fieldInfo struct {
++	name      string // Original field name
++	paramName string // Computed parameter name (with prefix)
++	fieldType reflect.Type
++	isPtr     bool
++	isArray   bool
++	isSlice   bool
++	isOption  bool
++	isSensitive bool // Whether the field is marked as sensitive
++}
++
++// QueryParamParser provides a generic way to parse query parameters into structs
++type QueryParamParser[T any] struct {
++	prefix     string
++	fields     []fieldInfo
++	resultType reflect.Type
++}
++
++// NewQueryParamParser creates a new param mapper with the default given prefix "filter_"
++func NewQueryParamParser[T any]() *QueryParamParser[T] {
++	return NewQueryParamParserWithPrefix[T]("filter_")
++}
++
++func NewQueryParamParserWithPrefix[T any](prefix string) *QueryParamParser[T] {
++	m := &QueryParamParser[T]{
++		prefix: prefix,
++	}
++
++	// Create a zero value of T to get its type information
++	var zero T
++	val := reflect.ValueOf(&zero).Elem()
++	m.resultType = val.Type()
++
++	// Pre-compute field information
++	for i := 0; i < val.NumField(); i++ {
++		field := m.resultType.Field(i)
++		fieldValue := val.Field(i)
++
++		// Skip unexported fields
++		if !fieldValue.CanSet() {
++			continue
++		}
++
++		// Check if field is marked as sensitive
++		isSensitive := false
++		if tag, ok := field.Tag.Lookup("queryparams"); ok {
++			isSensitive = tag == "sensitive"
++		}
++
++		// Compute field characteristics
++		fieldType := field.Type
++		isPtr := fieldType.Kind() == reflect.Ptr
++		isArray := fieldType.Kind() == reflect.Array
++		isSlice := fieldType.Kind() == reflect.Slice
++
++		if isPtr {
++			fieldType = fieldType.Elem()
++		}
++
++		info := fieldInfo{
++			name:        field.Name,
++			paramName:   prefix + strcase.ToSnake(field.Name),
++			fieldType:   fieldType,
++			isPtr:       isPtr,
++			isArray:     isArray,
++			isSlice:     isSlice,
++			isOption:    isOption(fieldValue),
++			isSensitive: isSensitive,
++		}
++
++		// If it's an Option type, get its underlying type
++		if info.isOption {
++			var err error
++			info.fieldType, err = getOptionGenericType(info.fieldType)
++			if err != nil {
++				// Skip fields with invalid Option types
++				continue
++			}
++		}
++
++		m.fields = append(m.fields, info)
++	}
++
++	return m
++}
++
++// parseValue parses a string value into a reflect.Value based on the target type
++func (m *QueryParamParser[T]) parseValue(paramName, value string, targetType reflect.Type) (reflect.Value, error) {
++	switch targetType.Kind() {
++	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
++		intValue, err := strconv.ParseInt(value, 10, 64)
++		if err != nil {
++			return reflect.Value{}, errors.Newf("invalid %s: %s", paramName, value)
++		}
++		return reflect.ValueOf(intValue).Convert(targetType), nil
++
++	case reflect.String:
++		return reflect.ValueOf(value).Convert(targetType), nil
++
++	case reflect.Bool:
++		boolValue, err := strconv.ParseBool(value)
++		if err != nil {
++			return reflect.Value{}, errors.Newf("invalid %s: %s", paramName, value)
++		}
++		return reflect.ValueOf(boolValue).Convert(targetType), nil
++
++	case reflect.Float32, reflect.Float64:
++		floatValue, err := strconv.ParseFloat(value, 64)
++		if err != nil {
++			return reflect.Value{}, errors.Newf("invalid %s: %s", paramName, value)
++		}
++		return reflect.ValueOf(floatValue).Convert(targetType), nil
++
++	case reflect.Array, reflect.Slice:
++		return reflect.Value{}, errors.Newf("collections should be handled by parseCollectionValues")
++
++	default:
++		return reflect.Value{}, errors.Newf("unsupported type: %s", targetType.Kind())
++	}
++}
++
++// setOptionValue creates an Option value and sets it on the field
++func (m *QueryParamParser[T]) setOptionValue(fieldValue reflect.Value, value reflect.Value) error {
++	switch value.Kind() {
++	case reflect.Int32:
++		option := core.Some(value.Interface().(int32))
++		fieldValue.Set(reflect.ValueOf(option))
++	case reflect.Int64:
++		option := core.Some(value.Interface().(int64))
++		fieldValue.Set(reflect.ValueOf(option))
++	case reflect.String:
++		option := core.Some(value.Interface().(string))
++		fieldValue.Set(reflect.ValueOf(option))
++	case reflect.Bool:
++		option := core.Some(value.Interface().(bool))
++		fieldValue.Set(reflect.ValueOf(option))
++	case reflect.Float32:
++		option := core.Some(value.Interface().(float32))
++		fieldValue.Set(reflect.ValueOf(option))
++	case reflect.Float64:
++		option := core.Some(value.Interface().(float64))
++		fieldValue.Set(reflect.ValueOf(option))
++	case reflect.Slice:
++		// Handle Option[[]T]
++		switch value.Type().Elem().Kind() {
++		case reflect.Int32:
++			option := core.Some(value.Interface().([]int32))
++			fieldValue.Set(reflect.ValueOf(option))
++		case reflect.String:
++			option := core.Some(value.Interface().([]string))
++			fieldValue.Set(reflect.ValueOf(option))
++		case reflect.Bool:
++			option := core.Some(value.Interface().([]bool))
++			fieldValue.Set(reflect.ValueOf(option))
++		case reflect.Float32:
++			option := core.Some(value.Interface().([]float32))
++			fieldValue.Set(reflect.ValueOf(option))
++		case reflect.Float64:
++			option := core.Some(value.Interface().([]float64))
++			fieldValue.Set(reflect.ValueOf(option))
++		default:
++			return errors.Newf("unsupported optional slice element type: %s", value.Type().Elem().Kind())
++		}
++	default:
++		return errors.Newf("unsupported option type: %s", value.Kind())
++	}
++	return nil
++}
++
++// setFieldValue sets a value on a field, handling pointers and options
++func (m *QueryParamParser[T]) setFieldValue(fieldValue reflect.Value, value reflect.Value, isPtr, isOption bool) error {
++	if isOption {
++		return m.setOptionValue(fieldValue, value)
++	}
++
++	if isPtr {
++		ptr := reflect.New(value.Type())
++		ptr.Elem().Set(value)
++		fieldValue.Set(ptr)
++		return nil
++	}
++
++	fieldValue.Set(value)
++	return nil
++}
++
++// parseCollectionValues parses a comma-separated string into a collection (slice or array)
++func (m *QueryParamParser[T]) parseCollectionValues(paramName, paramValue string, fieldType reflect.Type, isArray bool) (reflect.Value, error) {
++	elemType := fieldType.Elem()
++	values := strings.Split(paramValue, ",")
++
++	if isArray && len(values) != fieldType.Len() {
++		return reflect.Value{}, errors.Newf("array length mismatch for %s: expected %d, got %d", paramName, fieldType.Len(), len(values))
++	}
++
++	var container reflect.Value
++	if isArray {
++		container = reflect.New(fieldType).Elem()
++	} else {
++		container = reflect.MakeSlice(fieldType, 0, len(values))
++	}
++
++	for i, val := range values {
++		val = strings.TrimSpace(val)
++		elem, err := m.parseValue(paramName, val, elemType)
++		if err != nil {
++			return reflect.Value{}, err
++		}
++
++		if isArray {
++			container.Index(i).Set(elem)
++		} else {
++			container = reflect.Append(container, elem)
++		}
++	}
++
++	return container, nil
++}
++
++// Parse parses query parameters into a struct of type T
++func (m *QueryParamParser[T]) Parse(params *QueryParams) (T, error) {
++	var result T
++	resultValue := reflect.ValueOf(&result).Elem()
++
++	for _, field := range m.fields {
++		// Skip sensitive fields
++		if field.isSensitive {
++			continue
++		}
++
++		paramValue := params.URL.Get(field.paramName)
++		if paramValue == "" {
++			continue
++		}
++
++		// Get the field value for this parse operation
++		fieldValue := resultValue.FieldByName(field.name)
++		isCollection := field.isArray || field.isSlice
++
++		// Handle collections (arrays and slices)
++		if isCollection || (field.isOption && field.fieldType.Kind() == reflect.Slice) {
++			collectionType := field.fieldType
++			container, err := m.parseCollectionValues(field.paramName, paramValue, collectionType, field.isArray)
++			if err != nil {
++				return result, err
++			}
++
++			if field.isOption {
++				if err := m.setOptionValue(fieldValue, container); err != nil {
++					return result, err
++				}
++			} else {
++				fieldValue.Set(container)
++			}
++			continue
++		}
++
++		// Handle non-collection types
++		value, err := m.parseValue(field.paramName, paramValue, field.fieldType)
++		if err != nil {
++			return result, err
++		}
++
++		if err := m.setFieldValue(fieldValue, value, field.isPtr, field.isOption); err != nil {
++			return result, err
++		}
++	}
++
++	return result, nil
++}
++
++func getOptionGenericType(fieldType reflect.Type) (reflect.Type, error) {
++	// introspects the type of the "value" field
++	if valueField, found := fieldType.FieldByName("value"); found {
++		return valueField.Type, nil
++	}
++
++	return nil, errors.New("couldn't determine the underlying type of Option")
++}
++
++// isOption checks if a field is a core.Option type
++func isOption(field reflect.Value) bool {
++	// Check if type is Option by examining its name and structure
++	typeName := field.Type().String()
++	// For example: core.Option[int32]
++	return strings.Contains(typeName, "core.Option")
++}
+diff --git a/internal/queryparams/query_param_parser_test.go b/internal/queryparams/query_param_parser_test.go
+new file mode 100644
+index 000000000000..58ae50a14278
+--- /dev/null
++++ b/internal/queryparams/query_param_parser_test.go
+@@ -0,0 +1,187 @@
++package queryparams
++
++import (
++	"net/url"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++
++	"github.com/sourcegraph/sourcegraph/lib/core"
++	"github.com/sourcegraph/sourcegraph/lib/pointers"
++)
++
++type TestOptions struct {
++	AgentId           core.Option[int32]
++	RepoId            core.Option[int32]
++	Name              core.Option[string]
++	PullRequestApiUrl core.Option[string]
++	PointerToString   *string
++
++	ArrayOfInts      []int32
++	MaybeArrayOfInts core.Option[[]int32]
++
++	ArrayOfStrings      []string
++	MaybeArrayOfStrings core.Option[[]string]
++
++	FixedInts    [3]int32
++	FixedStrings [2]string
++
++	EnableFeature bool
++	SensitiveFlag bool `queryparams:"sensitive"`
++}
++
++func TestQueryParamParser(t *testing.T) {
++	tests := []struct {
++		name           string
++		queryParams    map[string]string
++		expectedResult TestOptions
++		expectError    bool
++	}{
++		{
++			name: "parse int fields",
++			queryParams: map[string]string{
++				"filter_agent_id": "123",
++				"filter_repo_id":  "456",
++			},
++			expectedResult: TestOptions{
++				AgentId: core.Some(int32(123)),
++				RepoId:  core.Some(int32(456)),
++			},
++		},
++		{
++			name: "parse string field",
++			queryParams: map[string]string{
++				"filter_name":                 "test-name",
++				"filter_pull_request_api_url": "http://example.com/api",
++				"filter_pointer_to_string":    "test-string",
++			},
++			expectedResult: TestOptions{
++				Name:              core.Some("test-name"),
++				PullRequestApiUrl: core.Some("http://example.com/api"),
++				PointerToString:   pointers.Ptr("test-string"),
++			},
++		},
++		{
++			name: "parse boolean field",
++			queryParams: map[string]string{
++				"filter_enable_feature": "true",
++			},
++			expectedResult: TestOptions{
++				EnableFeature: true,
++			},
++		},
++		{
++			name: "parse array of ints",
++			queryParams: map[string]string{
++				"filter_array_of_ints":       "1,2,3",
++				"filter_maybe_array_of_ints": "4,5,6",
++			},
++			expectedResult: TestOptions{
++				ArrayOfInts:      []int32{1, 2, 3},
++				MaybeArrayOfInts: core.Some([]int32{4, 5, 6}),
++			},
++		},
++		{
++			name: "parse multiple fields",
++			queryParams: map[string]string{
++				"filter_agent_id":       "123",
++				"filter_name":           "test-name",
++				"filter_enable_feature": "true",
++			},
++			expectedResult: TestOptions{
++				AgentId:       core.Some(int32(123)),
++				Name:          core.Some("test-name"),
++				EnableFeature: true,
++			},
++		},
++		{
++			name: "invalid int value",
++			queryParams: map[string]string{
++				"filter_agent_id": "not-a-number",
++			},
++			expectError: true,
++		},
++		{
++			name: "invalid boolean value",
++			queryParams: map[string]string{
++				"filter_enable_feature": "not-a-boolean",
++			},
++			expectError: true,
++		},
++		{
++			name: "parse fixed arrays",
++			queryParams: map[string]string{
++				"filter_fixed_ints":    "1,2,3",
++				"filter_fixed_strings": "hello,world",
++			},
++			expectedResult: TestOptions{
++				FixedInts:    [3]int32{1, 2, 3},
++				FixedStrings: [2]string{"hello", "world"},
++			},
++		},
++		{
++			name: "array length mismatch",
++			queryParams: map[string]string{
++				"filter_fixed_ints": "1,2", // Should be 3 values
++			},
++			expectError: true,
++		},
++		{
++			name: "array length too long",
++			queryParams: map[string]string{
++				"filter_fixed_strings": "too,many,values", // Should be 2 values
++			},
++			expectError: true,
++		},
++		{
++			name: "parse optional arrays of different types",
++			queryParams: map[string]string{
++				"filter_maybe_array_of_ints":    "1,2,3",
++				"filter_maybe_array_of_strings": "hello,world",
++				"filter_array_of_strings":       "foo,bar",
++			},
++			expectedResult: TestOptions{
++				MaybeArrayOfInts:    core.Some([]int32{1, 2, 3}),
++				MaybeArrayOfStrings: core.Some([]string{"hello", "world"}),
++				ArrayOfStrings:      []string{"foo", "bar"},
++			},
++		},
++		{
++			name: "sensitive fields should not be parsed",
++			queryParams: map[string]string{
++				"filter_sensitive_flag": "true",
++				"filter_enable_feature": "true",
++			},
++			expectedResult: TestOptions{
++				EnableFeature: true,
++				SensitiveFlag: false, // Should remain unchanged
++			},
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			// Create URL values from test query params
++			values := url.Values{}
++			for k, v := range tt.queryParams {
++				values.Set(k, v)
++			}
++
++			// Create a test URL with query parameters
++			testURL, _ := url.Parse("http://test.com?" + values.Encode())
++			params := NewQueryParams(testURL.Query())
++
++			// Create and use the mapper
++			mapper := NewQueryParamParser[TestOptions]()
++			result, err := mapper.Parse(params)
++
++			if tt.expectError {
++				assert.Error(t, err)
++				return
++			}
++
++			assert.NoError(t, err)
++			assert.Equal(t, tt.expectedResult, result)
++		})
++	}
++}
+diff --git a/sg.config.yaml b/sg.config.yaml
+index 828718b7f62a..13714dcacadc 100644
+--- a/sg.config.yaml
++++ b/sg.config.yaml
+@@ -706,6 +706,7 @@ commands:
+       pnpm run generate
+     env:
+       SK_BACKEND: go
++      SK_LOGLEVEL: 0
+ 
+   web-sveltekit-server:
+     description: Starts the vite dev server for the SvelteKit app
+@@ -2454,8 +2455,8 @@ tests:
+   # These can be run with `sg test [name]`
+   agents:
+     cmd: |
+-      go test github.com/sourcegraph/sourcegraph/cmd/frontend/internal/{agentapi,reviewapi,conversationapi} github.com/sourcegraph/sourcegraph/internal/{review,rule}
+-      go test -run '(TestChangesets|TestAgents|TestReviews|TestConversations)' github.com/sourcegraph/sourcegraph/internal/database github.com/sourcegraph/sourcegraph/internal/database/fakedb
++      go test github.com/sourcegraph/sourcegraph/cmd/frontend/internal/{agentapi,reviewapi,conversationapi} github.com/sourcegraph/sourcegraph/internal/{review,rule}/...
++      go test -run '(TestAgents|TestChangesets|TestConversations|TestReviews|TestRules)' github.com/sourcegraph/sourcegraph/internal/database github.com/sourcegraph/sourcegraph/internal/database/fakedb
+ 
+   backend:
+     cmd: go test
