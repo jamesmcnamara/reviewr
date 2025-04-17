@@ -1,45 +1,27 @@
 import { Anthropic } from '@anthropic-ai/sdk';
-import * as fsPromises from 'fs/promises';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Define our own types to match Anthropic's API
-type MessageParam = {
-  role: 'user' | 'assistant';
-  content: string | ContentBlock[];
-  name?: string;
-};
-
 import { ToolHandler, ToolCall, Tool, getToolSchema } from './toolHandler';
-
-type TextBlock = {
-  type: 'text';
-  text: string;
-};
-
-type ToolUseBlock = {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-};
-
-type ToolResultBlock = {
-  type: 'tool_result';
-  tool_use_id: string;
-  content: string;
-};
-
-type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+import {
+  ContentBlock,
+  ContentBlockParam,
+  MessageParam,
+  TextBlock
+} from '@anthropic-ai/sdk/resources/index.mjs';
 
 class LlmClient {
   private client: Anthropic;
   private toolHandler: ToolHandler;
 
-  constructor(apiKey: string, toolHandler: ToolHandler, private logDirectory?: string) {
+  constructor(
+    apiKey: string,
+    toolHandler: ToolHandler,
+    private logDirectory?: string
+  ) {
     this.client = new Anthropic({ apiKey });
     this.toolHandler = toolHandler;
-    
+
     // Create log directory if specified and doesn't exist
     if (this.logDirectory) {
       try {
@@ -47,7 +29,11 @@ class LlmClient {
           fs.mkdirSync(this.logDirectory, { recursive: true });
         }
       } catch (err) {
-        console.error(`Failed to create log directory: ${err instanceof Error ? err.message : String(err)}`);
+        console.error(
+          `Failed to create log directory: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
       }
     }
   }
@@ -68,6 +54,9 @@ class LlmClient {
     ...additionalTools: Tool<any>[]
   ): Promise<string> {
     const messages: MessageParam[] = [{ role: 'user', content: prompt }];
+    for (const tool of additionalTools) {
+      this.toolHandler.registerTool(tool);
+    }
 
     let hasToolCalls = true;
 
@@ -79,11 +68,9 @@ class LlmClient {
         max_tokens: 4096,
         messages,
         system: systemPrompt,
-        tools: this.toolHandler
-          .getToolsSchema()
-          .concat(additionalTools.map(getToolSchema))
+        tools: this.toolHandler.getToolsSchema()
       });
-      
+
       // For testing purposes - allows our mock to simulate adding messages
       // @ts-ignore - This property is added by our test mock
       if (response._simulateConversation) {
@@ -97,10 +84,13 @@ class LlmClient {
       );
 
       if (toolUseBlocks.length > 0) {
-        console.log('Tool calls requested:', toolUseBlocks.map(block => block.name).join(', '));
+        console.log(
+          'Tool calls requested:',
+          toolUseBlocks.map((block) => block.name).join(', ')
+        );
 
         // Parse tool calls and execute them
-        const toolCalls: ToolCall[] = toolUseBlocks.map(block => ({
+        const toolCalls: ToolCall[] = toolUseBlocks.map((block) => ({
           tool_name: block.name,
           parameters: block.input
         }));
@@ -119,9 +109,9 @@ class LlmClient {
               type: 'tool_result',
               tool_use_id: block.id,
               content: toolResults[index].content
-            };
+            } as ContentBlockParam;
           })
-          .filter(Boolean); // Remove any null entries
+          .filter(Boolean) as ContentBlockParam[]; // Remove any null entries
 
         if (toolResultsContent.length > 0) {
           messages.push({
@@ -140,30 +130,41 @@ class LlmClient {
         if (this.logDirectory) {
           this.logConversation(messages, systemPrompt, logKey);
         }
-        
+
         return textBlock && textBlock.type === 'text'
           ? textBlock.text
           : 'No text response';
       }
     }
+    for (const tool of additionalTools) {
+      this.toolHandler.unregisterTool(tool.name);
+    }
 
     return 'Conversation completed';
   }
-  
+
   /**
    * Logs the conversation to a JSON file in the specified log directory
    */
-  private async logConversation(messages: MessageParam[], systemPrompt: string, logKey?: string): Promise<void> {
-    console.log(`Attempting to log conversation with ${messages.length} messages and key ${logKey || 'none'}`);  
+  private async logConversation(
+    messages: MessageParam[],
+    systemPrompt: string,
+    logKey?: string
+  ): Promise<void> {
+    console.log(
+      `Attempting to log conversation with ${
+        messages.length
+      } messages and key ${logKey || 'none'}`
+    );
     if (!this.logDirectory) return;
-    
+
     try {
       // Create a unique filename incorporating date and optional key
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const keyPart = logKey ? `-${logKey.replace(/[^a-zA-Z0-9-]/g, '_')}` : '';
       const filename = `conversation-${timestamp}${keyPart}.json`;
       const filePath = path.join(this.logDirectory, filename);
-      
+
       // Prepare the data to log
       const logData = {
         timestamp: new Date().toISOString(),
@@ -171,11 +172,11 @@ class LlmClient {
         messages,
         logKey
       };
-      
+
       // Convert any content arrays to strings for cleaner logging
       const sanitizedData = {
         ...logData,
-        messages: logData.messages.map(msg => {
+        messages: logData.messages.map((msg) => {
           if (Array.isArray(msg.content)) {
             // For assistant messages with complex content, simplify for logging
             return {
@@ -186,18 +187,30 @@ class LlmClient {
           return msg;
         })
       };
-      
+
       // For debugging
       console.log(`Writing log to ${filePath}`);
-      console.log(`Log data: ${JSON.stringify(sanitizedData).substring(0, 100)}...`);
-      
+      console.log(
+        `Log data: ${JSON.stringify(sanitizedData).substring(0, 100)}...`
+      );
+
       // Write the file
       try {
         // Use synchronous write to ensure completion before exiting
-        fs.writeFileSync(filePath, JSON.stringify(sanitizedData, null, 2), 'utf-8');
+        fs.writeFileSync(
+          filePath,
+          JSON.stringify(sanitizedData, null, 2),
+          'utf-8'
+        );
         console.log(`Conversation logged to ${filePath}`);
       } catch (writeError) {
-        console.error(`Failed to write log file: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
+        console.error(
+          `Failed to write log file: ${
+            writeError instanceof Error
+              ? writeError.message
+              : String(writeError)
+          }`
+        );
       }
     } catch (error) {
       console.error('Failed to log conversation:', error);

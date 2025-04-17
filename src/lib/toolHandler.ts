@@ -20,6 +20,10 @@ class ToolHandler {
     this.tools[tool.name] = tool;
   }
 
+  unregisterTool(name: string): void {
+    delete this.tools[name];
+  }
+
   async handleToolCalls(
     toolCalls: ToolCall[]
   ): Promise<{ name: string; content: string }[]> {

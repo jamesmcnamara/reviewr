@@ -18,42 +18,6 @@ export interface DependencyGraph {
   dependencies: Record<string, string[]>;
 }
 
-// Schema for analyzing chunk relationships
-const analyzeChunkSchema = z.object({
-  chunk: z
-    .object({
-      id: z.string().describe('The unique identifier for this diff chunk'),
-      content: z.string().describe('The content of the diff chunk'),
-      filename: z.string().describe('The filename this diff chunk belongs to')
-    })
-    .describe('The current diff chunk to analyze'),
-  existingNodes: z
-    .array(
-      z.object({
-        id: z.string(),
-        content: z
-          .string()
-          .max(500)
-          .describe('Preview of the content (truncated)'),
-        filename: z.string()
-      })
-    )
-    .describe('Previously analyzed diff chunks to compare against')
-});
-
-const analyzeChunkTool: Tool<typeof analyzeChunkSchema> = {
-  name: 'analyze_diff_chunk',
-  description:
-    'Analyze a diff chunk to determine its dependencies on other chunks',
-  schema: analyzeChunkSchema,
-  execute: async (params) => {
-    // This will be handled by the LLM
-    throw new Error(
-      'This tool should be handled by the LLM, not executed directly'
-    );
-  }
-};
-
 // Schema for processing a git diff file
 const processDiffSchema = z.object({
   diffPath: z.string().describe('The path to the git diff file to process'),
@@ -154,23 +118,8 @@ export async function processDiffChunks(
         prompt,
         systemPrompt,
         chunk.id, // Use chunk id as log key
-        ...([reportDependencies]) // Spread array to pass as rest parameters
+        ...[reportDependencies] // Spread array to pass as rest parameters
       );
-      let dependencies: string[] = [];
-
-      try {
-        // Try to parse the response as JSON
-        const parsedResponse = JSON.parse(response.trim());
-        dependencies = parsedResponse.dependencies || [];
-      } catch (e) {
-        console.error('Failed to parse LLM response:', e);
-        // Log the response for debugging
-        console.error('Response was:', response.substring(0, 100) + '...');
-        // Continue with empty dependencies if parsing fails
-      }
-
-      // Add the dependencies to our graph
-      graph.dependencies[chunk.id] = dependencies;
 
       // Add this node to processed nodes for future chunk analysis
       processedNodes.push(chunk);
@@ -190,7 +139,6 @@ export async function processDiffChunks(
 const reportDependenciesSchema = z.object({
   dependencies: z
     .array(z.string())
-    .min(1)
     .describe('The list of dependencies for this diff chunk'),
   chunkId: z
     .string()
@@ -375,8 +323,11 @@ const diffOrderingTool: Tool<typeof processDiffSchema> = {
 
       // Create a temporary LLM client and tool handler for this operation
       const tempToolHandler = new ToolHandler();
-      tempToolHandler.registerTool(analyzeChunkTool);
-      const tempLlmClient = new LlmClient(apiKey, tempToolHandler);
+      const tempLlmClient = new LlmClient(
+        apiKey,
+        tempToolHandler,
+        process.env.LOG_DIRECTORY
+      );
 
       // Process the chunks to build the dependency graph
       const graph = await processDiffChunks(chunks, tempLlmClient);
@@ -415,4 +366,4 @@ const diffOrderingTool: Tool<typeof processDiffSchema> = {
 // Import the ToolHandler class for the execute function
 import { ToolHandler } from '../lib/toolHandler';
 
-export { diffOrderingTool, analyzeChunkTool };
+export { diffOrderingTool };
