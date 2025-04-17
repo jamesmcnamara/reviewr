@@ -13,7 +13,7 @@ function App() {
   useEffect(() => {
     // In a real app, this would fetch from an API
     // For now, we'll load the JSON file directly
-    fetch('http://localhost:4000/api/diff')
+    fetch('/diffs_for_query_params.json')
       .then(response => {
         if (!response.ok) {
           throw new Error('Failed to load diffs data');

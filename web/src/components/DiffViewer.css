@@ -9,6 +9,7 @@
   margin-top: 0;
   margin-bottom: 0.5rem;
   color: #24292e;
+  text-transform: capitalize;
 }
 
 .diff-count {
