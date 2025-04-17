@@ -160,7 +160,7 @@ export async function processDiffChunks(
 
       try {
         // Try to parse the response as JSON
-        const parsedResponse = JSON.parse(response.trim());
+        const parsedResponse = JSON.parse((response || '').trim());
         dependencies = parsedResponse.dependencies || [];
       } catch (e) {
         console.error('Failed to parse LLM response:', e);

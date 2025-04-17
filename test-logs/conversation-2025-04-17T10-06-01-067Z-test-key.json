@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-04-17T10:06:01.067Z",
+  "systemPrompt": "Test system prompt",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Test prompt"
+    },
+    {
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"text\":\"Test response\"}]"
+    }
+  ],
+  "logKey": "test-key"
+}

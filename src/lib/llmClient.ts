@@ -1,7 +1,7 @@
 import { Anthropic } from '@anthropic-ai/sdk';
-import * as fsPromises from 'fs/promises';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
+import type { Messages } from '@anthropic-ai/sdk/resources';
 
 // Define our own types to match Anthropic's API
 type MessageParam = {
@@ -12,11 +12,13 @@ type MessageParam = {
 
 import { ToolHandler, ToolCall, Tool, getToolSchema } from './toolHandler';
 
+// Our simplified version of Anthropic's TextBlock (without citations)
 type TextBlock = {
   type: 'text';
   text: string;
 };
 
+// Our simplified version of Anthropic's ToolUseBlock
 type ToolUseBlock = {
   type: 'tool_use';
   id: string;
@@ -40,15 +42,12 @@ class LlmClient {
     this.client = new Anthropic({ apiKey });
     this.toolHandler = toolHandler;
     
-    // Create log directory if specified and doesn't exist
+    // Create log directory if specified
     if (this.logDirectory) {
-      try {
-        if (!fs.existsSync(this.logDirectory)) {
-          fs.mkdirSync(this.logDirectory, { recursive: true });
-        }
-      } catch (err) {
-        console.error(`Failed to create log directory: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      fs.mkdir(this.logDirectory, { recursive: true })
+        .catch(err => {
+          console.error(`Failed to create log directory: ${err instanceof Error ? err.message : String(err)}`);
+        });
     }
   }
 
@@ -109,7 +108,7 @@ class LlmClient {
         const toolResults = await this.toolHandler.handleToolCalls(toolCalls);
 
         // Add assistant message to the conversation
-        messages.push({ role: 'assistant', content: response.content });
+        messages.push({ role: 'assistant', content: response.content as any });
 
         // Format the tool results as expected by Anthropic API
         const toolResultsContent = toolUseBlocks
@@ -126,7 +125,7 @@ class LlmClient {
         if (toolResultsContent.length > 0) {
           messages.push({
             role: 'user',
-            content: toolResultsContent
+            content: toolResultsContent as any
           });
         }
       } else {
@@ -134,8 +133,8 @@ class LlmClient {
         hasToolCalls = false;
         // Find the text block
         const textBlock = response.content.find(
-          (block): block is TextBlock => block.type === 'text'
-        );
+          (block) => block.type === 'text'
+        ) as Messages.TextBlock | undefined;
         // Log the conversation if logDirectory is specified
         if (this.logDirectory) {
           this.logConversation(messages, systemPrompt, logKey);
@@ -191,14 +190,9 @@ class LlmClient {
       console.log(`Writing log to ${filePath}`);
       console.log(`Log data: ${JSON.stringify(sanitizedData).substring(0, 100)}...`);
       
-      // Write the file
-      try {
-        // Use synchronous write to ensure completion before exiting
-        fs.writeFileSync(filePath, JSON.stringify(sanitizedData, null, 2), 'utf-8');
-        console.log(`Conversation logged to ${filePath}`);
-      } catch (writeError) {
-        console.error(`Failed to write log file: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
-      }
+      // Write the file using promise-based fs
+      await fs.writeFile(filePath, JSON.stringify(sanitizedData, null, 2), 'utf-8');
+      console.log(`Conversation logged to ${filePath}`);
     } catch (error) {
       console.error('Failed to log conversation:', error);
     }
