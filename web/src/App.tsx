@@ -13,17 +13,16 @@ function App() {
   useEffect(() => {
     // In a real app, this would fetch from an API
     // For now, we'll load the JSON file directly
-    fetch('/diffs_for_tags.json')
+    fetch('http://localhost:4000/api/diff')
       .then(response => {
-        console.log("got diffs", response.body)
         if (!response.ok) {
           throw new Error('Failed to load diffs data');
         }
-        return response.text();
+        return response.json();
       })
       .then(data => {
         console.log(data)
-        // setTaggedDiffs(data);
+        setTaggedDiffs(data);
         setLoading(false);
       })
       .catch(err => {

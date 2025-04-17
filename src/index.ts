@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { Command } from 'commander';
 import express from 'express';
 import fs from 'fs/promises';
+import cors from 'cors';
 import { ToolHandler } from './lib/toolHandler';
 import { LlmClient } from './lib/llmClient';
 import { fileTool, listFilesTool } from './tools/fileTool';
@@ -144,6 +145,7 @@ program
     const port = parseInt(options.port, 10);
 
     app.use(express.json());
+    app.use(cors());
 
     // Create the router
     const router = express.Router();
@@ -160,6 +162,22 @@ program
         llmClient
           .runWithTools(prompt, systemPrompt, logKey)
           .then((response) => res.json({ response }))
+          .catch((error) =>
+            res.status(500).json({
+              error: error instanceof Error ? error.message : String(error)
+            })
+          );
+      } catch (error) {
+        res.status(500).json({
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+    
+    router.get('/diff', (req, res) => {
+      try {
+        fs.readFile('./diffs_for_tags.json', 'utf-8')
+          .then((data) => res.json(JSON.parse(data)))
           .catch((error) =>
             res.status(500).json({
               error: error instanceof Error ? error.message : String(error)
