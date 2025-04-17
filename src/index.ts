@@ -5,6 +5,7 @@ import { ToolHandler } from './lib/toolHandler';
 import { LlmClient } from './lib/llmClient';
 import { fileTool, listFilesTool } from './tools/fileTool';
 import { processTextTool } from './tools/processingTool';
+import { parseDiffTool, readDiffFileTool } from './tools/diffTool';
 
 dotenv.config();
 
@@ -20,6 +21,8 @@ const toolHandler = new ToolHandler();
 toolHandler.registerTool(fileTool);
 toolHandler.registerTool(listFilesTool);
 toolHandler.registerTool(processTextTool);
+toolHandler.registerTool(parseDiffTool);
+toolHandler.registerTool(readDiffFileTool);
 
 // Initialize LLM client
 const llmClient = new LlmClient(apiKey, toolHandler);

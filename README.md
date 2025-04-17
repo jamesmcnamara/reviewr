@@ -1,4 +1,4 @@
-# Reviewr - A TypeScript LLM Tool Execution Framework
+# Reviewr - A TypeScript LLM Tool Execution Framework with Testing
 
 This project provides a framework for sending prompts to LLMs (like Anthropic's Claude) and having them execute local tools. It uses Zod for schema validation and JSON Schema generation.
 
@@ -90,3 +90,42 @@ toolHandler.registerTool(myTool);
 5. The LLM continues generating a response
 
 The Zod schemas provide both runtime validation and generate JSON Schema for the LLM to understand the tool parameters.
+
+## Testing
+
+This project uses Jest for testing. The tests are located in the `__tests__` directories throughout the project.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (useful during development)
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
+### Writing Tests
+
+Tests are written using Jest. Each test file should be located next to the code it tests in an `__tests__` directory, with a `.test.ts` extension.
+
+Example:
+
+```typescript
+// src/lib/__tests__/myModule.test.ts
+import { myFunction } from '../myModule';
+
+describe('myFunction', () => {
+  it('should do something', () => {
+    const result = myFunction();
+    expect(result).toBe(expectedValue);
+  });
+});
+```
+
+### Test Coverage
+
+The project aims to maintain high test coverage. Run `npm run test:coverage` to see the current coverage report.

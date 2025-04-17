@@ -68,4 +68,5 @@ class ToolHandler {
   }
 }
 
-export { ToolHandler, Tool, ToolCall };
+export { ToolHandler };
+export type { Tool, ToolCall };
