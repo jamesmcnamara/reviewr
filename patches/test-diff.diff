@@ -1,0 +1,56 @@
+diff --git a/src/lib/interfaces.ts b/src/lib/interfaces.ts
+index 0000000..1234567 100644
+--- /dev/null
++++ b/src/lib/interfaces.ts
+@@ -0,0 +1,9 @@
++// Define core interfaces
++export interface User {
++  id: string;
++  name: string;
++  email: string;
++}
++
++export interface UserRepository {
++  findById(id: string): Promise<User | null>;
++}
+
+diff --git a/src/lib/userRepository.ts b/src/lib/userRepository.ts
+index 0000000..2345678 100644
+--- /dev/null
++++ b/src/lib/userRepository.ts
+@@ -0,0 +1,12 @@
++import { User, UserRepository } from './interfaces';
++import { db } from './database';
++
++export class UserRepositoryImpl implements UserRepository {
++  async findById(id: string): Promise<User | null> {
++    try {
++      const user = await db.users.findOne({ id });
++      return user;
++    } catch (error) {
++      console.error('Error finding user:', error);
++      return null;
++    }
++  }
++}
+
+diff --git a/src/services/userService.ts b/src/services/userService.ts
+index 1234567..3456789 100644
+--- a/src/services/userService.ts
++++ b/src/services/userService.ts
+@@ -1,8 +1,8 @@
+-// User service implementation
+-export class UserService {
+-  async getUser(id: string) {
+-    // Old implementation
+-    const user = { id, name: 'Default' };
+-    return user;
++import { User, UserRepository } from '../lib/interfaces';
++
++export class UserService {
++  constructor(private userRepository: UserRepository) {}
++  
++  async getUser(id: string): Promise<User | null> {
++    return this.userRepository.findById(id);
+   }
+ }

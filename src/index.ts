@@ -5,6 +5,8 @@ import fs from 'fs/promises';
 import { ToolHandler } from './lib/toolHandler';
 import { LlmClient } from './lib/llmClient';
 import { fileTool, listFilesTool } from './tools/fileTool';
+import { diffOrderingTool } from './tools/diffOrderingTool';
+import { parseDiffTool, readDiffFileTool } from './tools/diffTool';
 
 dotenv.config();
 
@@ -19,6 +21,9 @@ if (!apiKey) {
 const toolHandler = new ToolHandler();
 toolHandler.registerTool(fileTool);
 toolHandler.registerTool(listFilesTool);
+toolHandler.registerTool(diffOrderingTool);
+toolHandler.registerTool(parseDiffTool);
+toolHandler.registerTool(readDiffFileTool);
 // Initialize LLM client
 const llmClient = new LlmClient(apiKey, toolHandler);
 
@@ -57,6 +62,32 @@ program
       const diff = await fs.readFile('./patches/grader-patch.diff', 'utf-8');
       const tokens = await llmClient.countTokens(diff);
       console.log(`Number of tokens: ${tokens}`);
+    } catch (error) {
+      console.error(
+        'Error:',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    process.exit(0);
+  });
+
+program
+  .command('order-diff')
+  .description('Order a git diff file for optimal review')
+  .option('-i, --input <path>', 'Path to the input diff file', './patches/grader-patch.diff')
+  .option('-o, --output <path>', 'Path to save the ordered diff', './ordered-diff.md')
+  .action(async (options) => {
+    try {
+      console.log(`Processing diff file: ${options.input}`);
+      const result = await toolHandler.handleToolCalls([{
+        tool_name: 'order_diff',
+        parameters: {
+          diffPath: options.input,
+          outputPath: options.output
+        }
+      }]);
+      
+      console.log(JSON.parse(result[0].content).message);
     } catch (error) {
       console.error(
         'Error:',

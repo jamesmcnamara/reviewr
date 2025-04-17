@@ -129,3 +129,50 @@ describe('myFunction', () => {
 ### Test Coverage
 
 The project aims to maintain high test coverage. Run `npm run test:coverage` to see the current coverage report.
+
+## Git Diff Ordering Tool
+
+This project includes a tool for ordering git diffs in a logical way to make them easier for humans to review. The tool uses an LLM to build a dependency graph of the changes, then topologically sorts them to present the most fundamental changes first.
+
+### How It Works
+
+1. The tool parses a git diff file into chunks
+2. It processes each chunk with an LLM to determine dependencies between chunks
+3. It builds a dependency graph where nodes are chunks and edges represent "depends on" relationships
+4. It performs a topological sort on the graph to order changes from most fundamental to most dependent
+5. It generates a Markdown output with the ordered diff chunks
+
+### Usage
+
+```bash
+# Process a diff file with default options
+node dist/index.js order-diff
+
+# Process a specific diff file and save output to a custom location
+node dist/index.js order-diff -i path/to/changes.diff -o ordered-review.md
+```
+
+### Algorithm Details
+
+The dependency graph algorithm works by:
+
+1. Processing each chunk individually with an LLM that analyzes what entities it modifies (functions, classes, interfaces)
+2. Having the LLM identify dependencies between each chunk and previously processed chunks (e.g., "this implementation depends on that interface")
+3. Building a directed graph structure where nodes are diff chunks and edges represent "depends on" relationships
+4. Performing a topological sort to order the changes from most fundamental to most dependent
+5. Handling cycles in the dependency graph gracefully by breaking them when needed
+
+This approach works well even with very large diffs because it processes chunks incrementally, allowing the LLM to build a global understanding of the changes over time without needing to see the entire diff at once.
+
+### Implementation Details
+
+Our implementation in this project follows these specific steps:
+
+1. Parse the git diff into chunks using the `parse-diff` library
+2. For each chunk, extract the added content and create a proper patch representation
+3. Process each chunk sequentially, asking the LLM to identify dependencies on previously processed chunks
+4. Build a dependency graph where nodes are diff chunks and edges represent dependencies
+5. Sort the graph topologically to get the optimal review order
+6. Generate a formatted Markdown document with the ordered diff chunks
+
+The topological sort algorithm is implemented to handle cycles gracefully, which can occur in real-world code changes with circular dependencies.
