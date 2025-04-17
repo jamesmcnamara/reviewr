@@ -1,0 +1,32 @@
+.diff-viewer-container {
+  flex: 1;
+  padding: 1rem 2rem;
+  overflow-y: auto;
+}
+
+.diff-viewer-header {
+  font-size: 1.5rem;
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: #24292e;
+}
+
+.diff-count {
+  color: #586069;
+  margin-bottom: 1.5rem;
+}
+
+.file-diffs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.diff-viewer-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #586069;
+  font-size: 1.2rem;
+}
