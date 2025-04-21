@@ -42,7 +42,9 @@ export const FileDiff: React.FC<FileDiffProps> = ({ diff }) => {
   };
 
   return (
-    <div className="file-diff-container">
+    <div>
+      <div className="diff-summary">{diff.summary}</div>
+      <div className="file-diff-container">
       <div className="file-header" onClick={toggleExpand}>
         <div className="file-info">
           <span className="filename">{diff.filename}</span>
@@ -63,6 +65,7 @@ export const FileDiff: React.FC<FileDiffProps> = ({ diff }) => {
           {renderDiffContent()}
         </div>
       )}
+      </div>
     </div>
   );
 };

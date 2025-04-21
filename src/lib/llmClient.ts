@@ -129,7 +129,7 @@ class LlmClient {
           );
           // Log the conversation if logDirectory is specified
           if (this.logDirectory) {
-            this.logConversation(messages, systemPrompt, logKey);
+            this.logConversation(messages, systemPrompt, logKey, this.toolHandler.getToolsSchema());
           }
 
           return textBlock && textBlock.type === 'text'
@@ -154,7 +154,8 @@ class LlmClient {
   private async logConversation(
     messages: MessageParam[],
     systemPrompt: string,
-    logKey?: string
+    logKey?: string,
+    tools?: any[]
   ): Promise<void> {
     console.log(
       `Attempting to log conversation with ${
@@ -175,7 +176,8 @@ class LlmClient {
         timestamp: new Date().toISOString(),
         systemPrompt,
         messages,
-        logKey
+        logKey,
+        tools
       };
 
       // Convert any content arrays to strings for cleaner logging

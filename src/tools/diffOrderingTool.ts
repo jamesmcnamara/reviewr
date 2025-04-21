@@ -22,6 +22,7 @@ interface Diff {
   filename: string;
   patch?: string;
   tags: string[];
+  summary?: string; // Short 1-2 sentence summary of the changes and positioning rationale
   priority: 'high' | 'low' | 'unknown';
 }
 
@@ -69,7 +70,11 @@ For example, when reviewing a new feature, an ideal order might be:
 
 You will receive a series of diff chunks, each with a unique ID. Your task is to analyze these diffs and determine the optimal review order of their IDs.
 
-VERY IMPORTANT: You MUST submit your final ordering using the submit_ordering tool with the list of diff IDs in the recommended review sequence.
+Additionally, for each diff chunk, provide a short (1-2 sentence) summary explaining the changes in the file and why it is positioned at its specific place in the order.
+
+VERY IMPORTANT: You MUST submit your final ordering using the reorder tool with:
+1. The list of diff IDs in the recommended review sequence
+2. A map of summaries for each chunk ID explaining what the change does and why it's positioned where it is
   `;
 
   let prompt = `All of the following chunks are related to ${tag}\n`;
@@ -80,7 +85,7 @@ VERY IMPORTANT: You MUST submit your final ordering using the submit_ordering to
     done: false,
     ordering: chunks
   };
-  const submitOrdering = reorderTool(ordering);
+  const reorder = reorderTool(ordering);
 
   let recursionLimit = 5;
 
@@ -89,7 +94,7 @@ VERY IMPORTANT: You MUST submit your final ordering using the submit_ordering to
       prompt,
       systemPrompt,
       `reordering-diffs-${tag}-${recursionLimit}`, // Use a fixed log key for reordering
-      ...[submitOrdering]
+      ...[reorder]
     );
   }
   if (recursionLimit == 0) {
@@ -308,9 +313,22 @@ function reportDependenciesTool(
 // Define the schema for the parse_diff tool parameters
 const reorderSchema = z.object({
   order: z
-    .array(z.string())
+    .array(
+      z.object({
+        chunkId: z
+          .string()
+          .describe(
+            'The id of the chunk which should be placed in the i-th position'
+          ),
+        summary: z
+          .string()
+          .describe(
+            'a short 1-2 sentence summaries explaining the changes in the file and why it is positioned where it is in the order'
+          )
+      })
+    )
     .describe(
-      'A list of ids of the chunks provided in the order they should be reviewed to be most intelligible'
+      'A list of objects which each contain an id of a chunk and a summary justifying its changes and position in the order they should be reviewed to be most intelligible'
     ),
   done: z
     .boolean()
@@ -328,20 +346,23 @@ interface Ordering {
 function reorderTool(ordering: Ordering): Tool<typeof reorderSchema> {
   return {
     name: 'reorder',
-    description: 'Reorder a list of diff chunks',
+    description:
+      'Reorder a list of diff chunks and provide summaries for each chunk',
     schema: reorderSchema,
     execute: async (params) => {
       if (params.done) {
         ordering.done = true;
         return;
       }
-      const reorderedChunks: DiffChunk[] = [];
-      for (const id of params.order) {
-        const chunk = ordering.ordering.find((c) => c.id === id);
+      const reorderedChunks: Diff[] = [];
+      for (const order of params.order) {
+        const chunk = ordering.ordering.find((c) => c.id === order.chunkId);
         if (chunk) {
+          chunk.summary = order.summary;
           reorderedChunks.push(chunk);
         }
       }
+      ordering.ordering = reorderedChunks;
       return 'Reorder successful';
     }
   };

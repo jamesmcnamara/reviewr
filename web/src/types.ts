@@ -3,6 +3,7 @@ export interface Diff {
   content: string;
   filename: string;
   patch?: string;
+  summary: string;
   tags: string[];
   priority: 'high' | 'low' | 'unknown';
 }
